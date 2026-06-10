@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useMap } from '../store/MapContext'
@@ -15,6 +15,7 @@ interface Props {
 export default function MapView({ fields = [], selectedFieldId, onFieldClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
+  const [searchText, setSearchText] = useState('')
   const vectorLayerRef = useRef<L.TileLayer | null>(null)
   const satelliteLayerRef = useRef<L.TileLayer | null>(null)
   const geoLayerRef = useRef<L.GeoJSON | null>(null)
@@ -73,6 +74,22 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick }: 
     }
   }, [])
 
+  // Search handler
+  const handleSearch = async () => {
+    if (!searchText.trim() || !mapRef.current) return
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&limit=1`
+      )
+      const data = await res.json()
+      if (data[0]) {
+        mapRef.current.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 14)
+      }
+    } catch {
+      mapRef.current.setView([30.25, 120.17], 14)
+    }
+  }
+
   // Field overlay
   useEffect(() => {
     if (!mapRef.current || fields.length === 0) return
@@ -127,6 +144,19 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick }: 
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] flex gap-2">
+        <input
+          value={searchText}
+          onChange={e => setSearchText(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSearch()}
+          placeholder="搜索地点..."
+          className="w-60 px-3 py-1.5 text-xs bg-[#131820] border border-[#1e2430] rounded-md text-[#9ca3af] outline-none focus:border-[#818cf8]"
+        />
+        <button onClick={handleSearch}
+          className="px-3 py-1.5 text-xs bg-[#131820] border border-[#1e2430] rounded-md text-[#9ca3af] hover:text-[#c8ccd0]">
+          搜索
+        </button>
+      </div>
     </div>
   )
 }

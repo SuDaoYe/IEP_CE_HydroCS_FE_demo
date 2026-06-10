@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import Sidebar from './Sidebar'
 import ToolBar from './ToolBar'
 import DataPanel from './DataPanel'
+import { useTheme } from '../store/ThemeContext'
 
 interface Props {
   children: ReactNode
@@ -20,6 +21,7 @@ export default function Layout({
   children, menuItems, activeMenu, onMenuClick,
   panelItems, tools, username, title, isAdmin, onLogout,
 }: Props) {
+  const { isDark, toggle } = useTheme()
   return (
     <div className="flex flex-col h-screen bg-[#0a0e17] text-[#c8ccd0]">
       {/* Top bar */}
@@ -29,6 +31,9 @@ export default function Layout({
           <span className={`text-xs ${isAdmin ? 'text-amber-400' : 'text-[#9ca3af]'}`}>
             {username}
           </span>
+          <button onClick={toggle} className="text-xs px-2.5 py-1 bg-[#1e2430] rounded text-[#9ca3af] hover:text-[#c8ccd0]">
+            {isDark ? '☀️ 亮色' : '🌙 暗色'}
+          </button>
           <button onClick={onLogout} className="text-xs text-[#6b7280] hover:text-[#9ca3af]">退出</button>
         </div>
       </div>
