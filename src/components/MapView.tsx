@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useMap } from '../store/MapContext'
 
 const ESRI_SATELLITE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const AMAP_VECTOR = 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
+
+interface SearchResult {
+  lat: number
+  lng: number
+  displayName: string
+}
 
 interface Props {
   fields?: any[]
@@ -13,10 +19,33 @@ interface Props {
   focusLocation?: { lat: number; lng: number; zoom?: number } | null
 }
 
+const HISTORY_KEY = 'hydrocs-search-history'
+const MAX_HISTORY = 8
+
+function loadHistory(): SearchResult[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(items: SearchResult[]) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY)))
+}
+
 export default function MapView({ fields = [], selectedFieldId, onFieldClick, focusLocation }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const [searchText, setSearchText] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [history, setHistory] = useState<SearchResult[]>(loadHistory)
+  const searchMarkerRef = useRef<L.Marker | null>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const vectorLayerRef = useRef<L.TileLayer | null>(null)
   const satelliteLayerRef = useRef<L.TileLayer | null>(null)
   const geoLayerRef = useRef<L.GeoJSON | null>(null)
@@ -75,42 +104,149 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick, fo
     }
   }, [])
 
-  // Search handler
-  const handleSearch = async () => {
-    if (!searchText.trim() || !mapRef.current) return
+  // Click outside to close dropdown
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Place a marker at the searched location
+  const placeMarker = useCallback((lat: number, lng: number) => {
+    if (!mapRef.current) return
+    if (searchMarkerRef.current) {
+      searchMarkerRef.current.remove()
+    }
+    const icon = L.divIcon({
+      className: '',
+      html: `<svg width="32" height="40" viewBox="0 0 32 40"><path d="M16 0C9.37 0 4 5.37 4 12c0 9 12 28 12 28s12-19 12-28C28 5.37 22.63 0 16 0z" fill="#818cf8"/><circle cx="16" cy="12" r="6" fill="white"/></svg>`,
+      iconSize: [32, 40],
+      iconAnchor: [16, 40],
+    })
+    const marker = L.marker([lat, lng], { icon }).addTo(mapRef.current)
+    marker.bindTooltip(`${lat.toFixed(4)}, ${lng.toFixed(4)}`, { direction: 'top', offset: [0, -36] })
+    searchMarkerRef.current = marker
+  }, [])
+
+  // Search handler with debounce via abort controller
+  const abortRef = useRef<AbortController | null>(null)
+
+  const doSearch = useCallback(async (query: string) => {
+    if (!query.trim() || !mapRef.current) return
+
+    if (abortRef.current) abortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setIsSearching(true)
+    setSearchError('')
+    setSearchResults([])
+
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&limit=1`,
-        { headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' } }
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`,
+        {
+          headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' },
+          signal: controller.signal,
+        }
       )
       const data = await res.json()
-      if (data && data.length > 0) {
-        mapRef.current.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 14)
-      } else {
-        // Fallback: try with "China" appended for better results
-        const res2 = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText + ' 中国')}&limit=1`,
-          { headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' } }
-        )
-        const data2 = await res2.json()
-        if (data2 && data2.length > 0) {
-          mapRef.current.setView([parseFloat(data2[0].lat), parseFloat(data2[0].lon)], 14)
+
+      if (!controller.signal.aborted) {
+        if (data && data.length > 0) {
+          const results: SearchResult[] = data.map((d: any) => ({
+            lat: parseFloat(d.lat),
+            lng: parseFloat(d.lon),
+            displayName: d.display_name || d.name,
+          }))
+          setSearchResults(results)
+          setShowDropdown(true)
+        } else {
+          // Fallback with "中国" appended
+          const res2 = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ' 中国')}&limit=5&addressdetails=1`,
+            {
+              headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' },
+              signal: controller.signal,
+            }
+          )
+          const data2 = await res2.json()
+          if (!controller.signal.aborted) {
+            if (data2 && data2.length > 0) {
+              const results: SearchResult[] = data2.map((d: any) => ({
+                lat: parseFloat(d.lat),
+                lng: parseFloat(d.lon),
+                displayName: d.display_name || d.name,
+              }))
+              setSearchResults(results)
+              setShowDropdown(true)
+            } else {
+              setSearchError('未找到结果，请尝试更具体的地点名称')
+              setShowDropdown(true)
+            }
+          }
         }
       }
-    } catch (err) {
-      console.error('Search failed:', err)
+    } catch (err: any) {
+      if (!controller.signal.aborted && err.name !== 'AbortError') {
+        setSearchError('搜索失败，请检查网络连接')
+        setShowDropdown(true)
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsSearching(false)
+      }
+    }
+  }, [])
+
+  const selectResult = useCallback((result: SearchResult) => {
+    if (!mapRef.current) return
+    mapRef.current.setView([result.lat, result.lng], 14, { animate: true, duration: 0.8 })
+    placeMarker(result.lat, result.lng)
+    setSearchText('')
+    setShowDropdown(false)
+
+    const newHistory = [result, ...history.filter(h => h.displayName !== result.displayName)]
+    setHistory(newHistory)
+    saveHistory(newHistory)
+  }, [history, placeMarker])
+
+  const handleInputChange = (value: string) => {
+    setSearchText(value)
+    if (value.trim().length >= 2) {
+      doSearch(value)
+    } else {
+      setSearchResults([])
+      setSearchError('')
+      setShowDropdown(false)
     }
   }
 
-  // Fly to focus location (used when navigating from MyFields)
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && searchText.trim()) {
+      doSearch(searchText)
+    }
+  }
+
+  const clearHistory = () => {
+    setHistory([])
+    localStorage.removeItem(HISTORY_KEY)
+  }
+
+  // Fly to focus location
   useEffect(() => {
     if (focusLocation && mapRef.current) {
       mapRef.current.setView([focusLocation.lat, focusLocation.lng], focusLocation.zoom || 15, {
         animate: true,
         duration: 1,
       })
+      placeMarker(focusLocation.lat, focusLocation.lng)
     }
-  }, [focusLocation])
+  }, [focusLocation, placeMarker])
 
   // Field overlay
   useEffect(() => {
@@ -163,21 +299,83 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick, fo
     }
   }, [fields, selectedFieldId, onFieldClick])
 
+  const showDropdownContent = showDropdown && (searchResults.length > 0 || isSearching || searchError || (!searchText.trim() && history.length > 0))
+
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] flex gap-2">
-        <input
-          value={searchText}
-          onChange={e => setSearchText(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSearch()}
-          placeholder="搜索地点..."
-          className="w-60 px-3 py-1.5 text-xs bg-[var(--bg-panel)] border border-[var(--border)] rounded-md text-[var(--text-body)] outline-none focus:border-[var(--accent)]"
-        />
-        <button onClick={handleSearch}
-          className="px-3 py-1.5 text-xs bg-[var(--bg-panel)] border border-[var(--border)] rounded-md text-[var(--text-body)] hover:text-[var(--text-primary)]">
-          搜索
-        </button>
+
+      {/* Search bar + dropdown */}
+      <div ref={dropdownRef} className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] flex flex-col" style={{ width: 360 }}>
+        <div className="flex gap-2">
+          <input
+            value={searchText}
+            onChange={e => handleInputChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => { if (searchResults.length > 0 || history.length > 0) setShowDropdown(true) }}
+            placeholder="搜索地点..."
+            className="flex-1 px-3 py-1.5 text-xs bg-[var(--bg-panel)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
+          />
+          <button
+            onClick={() => searchText.trim() && doSearch(searchText)}
+            disabled={isSearching}
+            className="px-3 py-1.5 text-xs bg-[var(--bg-panel)] border border-[var(--border)] rounded-md text-[var(--text-body)] hover:text-[var(--text-primary)] disabled:opacity-50 shrink-0"
+          >
+            {isSearching ? '搜索中...' : '搜索'}
+          </button>
+        </div>
+
+        {/* Dropdown */}
+        {showDropdownContent && (
+          <div className="mt-1 bg-[var(--bg-panel)] border border-[var(--border)] rounded-md shadow-lg overflow-hidden max-h-80 overflow-y-auto">
+            {isSearching && (
+              <div className="px-3 py-2 text-xs text-[var(--text-muted)] flex items-center gap-2">
+                <span className="inline-block w-3 h-3 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                搜索中...
+              </div>
+            )}
+
+            {searchError && !isSearching && (
+              <div className="px-3 py-2 text-xs text-[var(--warning)]">{searchError}</div>
+            )}
+
+            {!isSearching && !searchError && searchResults.length > 0 && (
+              <div>
+                <div className="px-3 py-1 text-[9px] text-[var(--text-muted)] uppercase tracking-wider">搜索结果</div>
+                {searchResults.map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => selectResult(r)}
+                    className="w-full text-left px-3 py-2 text-xs text-[var(--text-body)] hover:bg-[var(--accent-bg)] hover:text-[var(--text-primary)] border-b border-[var(--border)] last:border-b-0 transition-colors"
+                  >
+                    <div className="truncate">{r.displayName}</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{r.lat.toFixed(4)}, {r.lng.toFixed(4)}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Search history */}
+            {!isSearching && !searchError && searchResults.length === 0 && history.length > 0 && (
+              <div>
+                <div className="px-3 py-1 flex justify-between items-center">
+                  <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-wider">搜索历史</span>
+                  <button onClick={clearHistory} className="text-[9px] text-[var(--text-muted)] hover:text-[var(--text-body)]">清除</button>
+                </div>
+                {history.map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => selectResult(r)}
+                    className="w-full text-left px-3 py-2 text-xs text-[var(--text-body)] hover:bg-[var(--accent-bg)] hover:text-[var(--text-primary)] border-b border-[var(--border)] last:border-b-0 transition-colors"
+                  >
+                    <div className="truncate">{r.displayName}</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{r.lat.toFixed(4)}, {r.lng.toFixed(4)}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
