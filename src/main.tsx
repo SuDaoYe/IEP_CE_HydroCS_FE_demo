@@ -6,8 +6,12 @@ import App from './App'
 import './index.css'
 
 async function boot() {
-  const { worker } = await import('./api/handlers')
-  await worker.start({ onUnhandledRequest: 'bypass' })
+  try {
+    const { worker } = await import('./api/handlers')
+    await worker.start({ onUnhandledRequest: 'bypass' })
+  } catch (e) {
+    console.error('MSW failed to start, rendering without mock API:', e)
+  }
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
