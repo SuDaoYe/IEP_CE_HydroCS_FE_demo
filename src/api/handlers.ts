@@ -4,6 +4,9 @@ import { users, fields, irrigationRecords, weatherStatus } from './mock-data'
 import { generateToken } from './auth'
 import type { Field } from '../types'
 
+// Mock session: maps token -> userId
+const sessions = new Map<string, string>()
+
 const lag = () => delay(Math.random() * 300 + 100)
 
 export const handlers = [
@@ -16,6 +19,7 @@ export const handlers = [
       return HttpResponse.json({ error: '用户名或密码错误' }, { status: 401 })
     }
     const token = generateToken()
+    sessions.set(token, user.id)
     return HttpResponse.json({
       token,
       user: { id: user.id, username: user.username, role: user.role, name: user.name },
@@ -27,7 +31,9 @@ export const handlers = [
     const authHeader = request.headers.get('Authorization')
     if (!authHeader) return HttpResponse.json({ error: '未登录' }, { status: 401 })
     const token = authHeader.replace('Bearer ', '')
-    const user = users[0]
+    const userId = sessions.get(token)
+    const user = userId ? users.find(u => u.id === userId) : undefined
+    if (!user) return HttpResponse.json({ error: '未登录' }, { status: 401 })
     return HttpResponse.json({ id: user.id, username: user.username, role: user.role, name: user.name })
   }),
 
@@ -91,7 +97,9 @@ export const handlers = [
   http.get('/api/my/fields', async ({ request }) => {
     await lag()
     const authHeader = request.headers.get('Authorization') || ''
-    return HttpResponse.json(fields.filter(f => f.ownerId !== null))
+    const token = authHeader.replace('Bearer ', '')
+    const userId = sessions.get(token) || 'u2' // default to farmer1 for demo
+    return HttpResponse.json(fields.filter(f => f.ownerId === userId))
   }),
 
   http.post('/api/my/fields/bind', async ({ request }) => {
@@ -99,6 +107,7 @@ export const handlers = [
     const body = await request.json() as { fieldId: string; ownerId: string; crop: string; growthStage: string; plantDate: string }
     const field = fields.find(f => f.id === body.fieldId)
     if (!field) return HttpResponse.json({ error: '田块不存在' }, { status: 404 })
+    if (field.ownerId !== null) return HttpResponse.json({ error: '该田块已被绑定' }, { status: 409 })
     field.ownerId = body.ownerId
     field.crop = body.crop
     field.growthStage = body.growthStage
