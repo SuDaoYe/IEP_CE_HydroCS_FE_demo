@@ -2,15 +2,11 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useMap } from '../store/MapContext'
+import { searchLocations } from '../api/geocode'
+import type { GeoResult } from '../api/geocode'
 
 const ESRI_SATELLITE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const AMAP_VECTOR = 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
-
-interface SearchResult {
-  lat: number
-  lng: number
-  displayName: string
-}
 
 interface Props {
   fields?: any[]
@@ -22,7 +18,7 @@ interface Props {
 const HISTORY_KEY = 'hydrocs-search-history'
 const MAX_HISTORY = 8
 
-function loadHistory(): SearchResult[] {
+function loadHistory(): GeoResult[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY)
     return raw ? JSON.parse(raw) : []
@@ -31,7 +27,7 @@ function loadHistory(): SearchResult[] {
   }
 }
 
-function saveHistory(items: SearchResult[]) {
+function saveHistory(items: GeoResult[]) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY)))
 }
 
@@ -39,11 +35,11 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick, fo
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const [searchText, setSearchText] = useState('')
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchResults, setSearchResults] = useState<GeoResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
-  const [history, setHistory] = useState<SearchResult[]>(loadHistory)
+  const [history, setHistory] = useState<GeoResult[]>(loadHistory)
   const searchMarkerRef = useRef<L.Marker | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const vectorLayerRef = useRef<L.TileLayer | null>(null)
@@ -132,78 +128,30 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick, fo
     searchMarkerRef.current = marker
   }, [])
 
-  // Search handler with debounce via abort controller
-  const abortRef = useRef<AbortController | null>(null)
-
-  const doSearch = useCallback(async (query: string) => {
-    if (!query.trim() || !mapRef.current) return
-
-    if (abortRef.current) abortRef.current.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
+  // Local search (no network dependency)
+  const doSearch = useCallback((query: string) => {
+    if (!query.trim()) return
 
     setIsSearching(true)
     setSearchError('')
     setSearchResults([])
 
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`,
-        {
-          headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' },
-          signal: controller.signal,
-        }
-      )
-      const data = await res.json()
+    // Small delay so the loading spinner is visible for UX
+    setTimeout(() => {
+      const results = searchLocations(query, 5)
+      setIsSearching(false)
 
-      if (!controller.signal.aborted) {
-        if (data && data.length > 0) {
-          const results: SearchResult[] = data.map((d: any) => ({
-            lat: parseFloat(d.lat),
-            lng: parseFloat(d.lon),
-            displayName: d.display_name || d.name,
-          }))
-          setSearchResults(results)
-          setShowDropdown(true)
-        } else {
-          // Fallback with "中国" appended
-          const res2 = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ' 中国')}&limit=5&addressdetails=1`,
-            {
-              headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' },
-              signal: controller.signal,
-            }
-          )
-          const data2 = await res2.json()
-          if (!controller.signal.aborted) {
-            if (data2 && data2.length > 0) {
-              const results: SearchResult[] = data2.map((d: any) => ({
-                lat: parseFloat(d.lat),
-                lng: parseFloat(d.lon),
-                displayName: d.display_name || d.name,
-              }))
-              setSearchResults(results)
-              setShowDropdown(true)
-            } else {
-              setSearchError('未找到结果，请尝试更具体的地点名称')
-              setShowDropdown(true)
-            }
-          }
-        }
-      }
-    } catch (err: any) {
-      if (!controller.signal.aborted && err.name !== 'AbortError') {
-        setSearchError('搜索失败，请检查网络连接')
+      if (results.length > 0) {
+        setSearchResults(results)
+        setShowDropdown(true)
+      } else {
+        setSearchError('未找到匹配地点，请尝试其他关键词')
         setShowDropdown(true)
       }
-    } finally {
-      if (!controller.signal.aborted) {
-        setIsSearching(false)
-      }
-    }
+    }, 150)
   }, [])
 
-  const selectResult = useCallback((result: SearchResult) => {
+  const selectResult = useCallback((result: GeoResult) => {
     if (!mapRef.current) return
     mapRef.current.setView([result.lat, result.lng], 14, { animate: true, duration: 0.8 })
     placeMarker(result.lat, result.lng)
