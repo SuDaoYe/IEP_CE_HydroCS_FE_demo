@@ -11,7 +11,7 @@ export default function UserDashboardPage() {
   const navigate = useNavigate()
   const [nearbyFields, setNearbyFields] = useState<Field[]>([])
   const [selectedField, setSelectedField] = useState<Field | null>(null)
-  const [myFields, setMyFields] = useState<Field[]>([])
+  const [, setMyFields] = useState<Field[]>([])
   const [showBindDialog, setShowBindDialog] = useState(false)
   const [crop, setCrop] = useState('')
   const [growthStage, setGrowthStage] = useState('')
