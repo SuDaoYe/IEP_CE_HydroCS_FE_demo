@@ -7,6 +7,7 @@ import type { GeoResult } from '../api/geocode'
 
 const ESRI_SATELLITE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const AMAP_VECTOR = 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
+const AMAP_KEY = import.meta.env.VITE_AMAP_KEY as string || ''
 
 interface Props {
   fields?: any[]
@@ -128,27 +129,74 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick, fo
     searchMarkerRef.current = marker
   }, [])
 
-  // Local search (no network dependency)
-  const doSearch = useCallback((query: string) => {
+  // Search: 高德 API (with key) or built-in fallback
+  const doSearch = useCallback(async (query: string) => {
     if (!query.trim()) return
 
     setIsSearching(true)
     setSearchError('')
     setSearchResults([])
 
-    // Small delay so the loading spinner is visible for UX
-    setTimeout(() => {
-      const results = searchLocations(query, 5)
-      setIsSearching(false)
+    if (AMAP_KEY) {
+      // Use 高德 POI search API
+      try {
+        const url = new URL('https://restapi.amap.com/v3/place/text')
+        url.searchParams.set('keywords', query)
+        url.searchParams.set('key', AMAP_KEY)
+        url.searchParams.set('offset', '5')
+        const res = await fetch(url.toString())
+        const data = await res.json()
 
-      if (results.length > 0) {
-        setSearchResults(results)
-        setShowDropdown(true)
-      } else {
-        setSearchError('未找到匹配地点，请尝试其他关键词')
-        setShowDropdown(true)
+        if (data.status === '1' && data.pois && data.pois.length > 0) {
+          const results: GeoResult[] = data.pois.map((p: any) => {
+            const [lng, lat] = p.location.split(',').map(Number)
+            const addr = [p.pname, p.cityname, p.adname, p.address].filter((s: string) => s && s !== '[]').join('')
+            return {
+              lat,
+              lng,
+              displayName: `${p.name} · ${addr || p.cityname || p.pname}`,
+            }
+          })
+          setSearchResults(results)
+          setShowDropdown(true)
+        } else {
+          // Fallback to built-in list
+          const fallback = searchLocations(query, 5)
+          if (fallback.length > 0) {
+            setSearchResults(fallback)
+            setShowDropdown(true)
+          } else {
+            setSearchError('未找到匹配地点，请尝试其他关键词')
+            setShowDropdown(true)
+          }
+        }
+      } catch {
+        // Network error — fallback to built-in list
+        const fallback = searchLocations(query, 5)
+        if (fallback.length > 0) {
+          setSearchResults(fallback)
+          setShowDropdown(true)
+        } else {
+          setSearchError('搜索失败，请检查网络连接')
+          setShowDropdown(true)
+        }
+      } finally {
+        setIsSearching(false)
       }
-    }, 150)
+    } else {
+      // No key configured — use built-in list only
+      setTimeout(() => {
+        const results = searchLocations(query, 5)
+        setIsSearching(false)
+        if (results.length > 0) {
+          setSearchResults(results)
+          setShowDropdown(true)
+        } else {
+          setSearchError('未找到匹配地点（配置高德 Key 可获得完整搜索能力）')
+          setShowDropdown(true)
+        }
+      }, 100)
+    }
   }, [])
 
   const selectResult = useCallback((result: GeoResult) => {
