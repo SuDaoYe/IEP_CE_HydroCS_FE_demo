@@ -44,10 +44,10 @@ export default function UserManagePage() {
       tools={[]}
     >
       <div className="p-6 overflow-y-auto">
-        <h2 className="text-sm font-semibold text-[#c8ccd0] mb-4">用户管理</h2>
-        <table className="w-full text-xs text-[#9ca3af] border-collapse">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">用户管理</h2>
+        <table className="w-full text-xs text-[var(--text-body)] border-collapse">
           <thead>
-            <tr className="text-[#6b7280] border-b border-[#1e2430]">
+            <tr className="text-[var(--text-muted)] border-b border-[var(--border)]">
               <th className="text-left py-2 px-3">用户名</th>
               <th className="text-left py-2 px-3">姓名</th>
               <th className="text-left py-2 px-3">角色</th>
@@ -56,11 +56,11 @@ export default function UserManagePage() {
           </thead>
           <tbody>
             {users.map(u => (
-              <tr key={u.id} className="border-b border-[#131820]">
-                <td className="py-2 px-3 text-[#c8ccd0]">{u.username}</td>
+              <tr key={u.id} className="border-b border-[var(--bg-panel)]">
+                <td className="py-2 px-3 text-[var(--text-primary)]">{u.username}</td>
                 <td className="py-2 px-3">{u.name}</td>
                 <td className="py-2 px-3">
-                  <span className={u.role === 'admin' ? 'text-amber-400' : 'text-[#9ca3af]'}>
+                  <span className={u.role === 'admin' ? 'text-[var(--warning)]' : 'text-[var(--text-body)]'}>
                     {u.role === 'admin' ? '管理员' : '农户'}
                   </span>
                 </td>

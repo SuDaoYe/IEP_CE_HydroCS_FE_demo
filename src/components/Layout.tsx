@@ -23,18 +23,18 @@ export default function Layout({
 }: Props) {
   const { isDark, toggle } = useTheme()
   return (
-    <div className="flex flex-col h-screen bg-[#0a0e17] text-[#c8ccd0]">
+    <div className="flex flex-col h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-5 py-2.5 bg-[#131820] border-b border-[#1e2430] shrink-0">
-        <h1 className="text-sm font-semibold text-[#c8ccd0]">{title}</h1>
+      <div className="flex items-center justify-between px-5 py-2.5 bg-[var(--bg-topbar)] border-b border-[var(--border)] shrink-0">
+        <h1 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h1>
         <div className="flex items-center gap-4">
-          <span className={`text-xs ${isAdmin ? 'text-amber-400' : 'text-[#9ca3af]'}`}>
+          <span className={`text-xs ${isAdmin ? 'text-[var(--warning)]' : 'text-[var(--text-body)]'}`}>
             {username}
           </span>
-          <button onClick={toggle} className="text-xs px-2.5 py-1 bg-[#1e2430] rounded text-[#9ca3af] hover:text-[#c8ccd0]">
+          <button onClick={toggle} className="text-xs px-2.5 py-1 bg-[var(--border)] rounded text-[var(--text-body)] hover:text-[var(--text-primary)]">
             {isDark ? '☀️ 亮色' : '🌙 暗色'}
           </button>
-          <button onClick={onLogout} className="text-xs text-[#6b7280] hover:text-[#9ca3af]">退出</button>
+          <button onClick={onLogout} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-body)]">退出</button>
         </div>
       </div>
       {/* Main area */}

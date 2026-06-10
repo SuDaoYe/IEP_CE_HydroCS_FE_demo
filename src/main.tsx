@@ -2,20 +2,9 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { HeroUIProvider } from '@heroui/react'
 import { BrowserRouter } from 'react-router-dom'
-import { ThemeProvider, useTheme } from './store/ThemeContext'
+import { ThemeProvider } from './store/ThemeContext'
 import App from './App'
 import './index.css'
-
-function Root() {
-  const { isDark } = useTheme()
-  return (
-    <HeroUIProvider className={isDark ? 'dark' : 'light'}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </HeroUIProvider>
-  )
-}
 
 async function boot() {
   try {
@@ -28,7 +17,11 @@ async function boot() {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <ThemeProvider>
-        <Root />
+        <HeroUIProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </HeroUIProvider>
       </ThemeProvider>
     </React.StrictMode>,
   )

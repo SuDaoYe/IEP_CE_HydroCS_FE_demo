@@ -31,35 +31,35 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0a0e17]">
-      <Card className="w-full max-w-sm bg-[#131820] border border-[#1e2430]">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg-page)]">
+      <Card className="w-full max-w-sm bg-[var(--bg-panel)] border border-[var(--border)]">
         <CardHeader className="flex-col gap-1 pt-8 pb-0">
-          <h1 className="text-xl font-semibold text-[#c8ccd0]">HYDRO·CS</h1>
-          <p className="text-sm text-[#6b7280]">智能灌溉管理平台</p>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">HYDRO·CS</h1>
+          <p className="text-sm text-[var(--text-muted)]">智能灌溉管理平台</p>
         </CardHeader>
         <CardBody className="gap-4 pt-6 pb-8 px-8">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <Input
-              label="用户名"
+              placeholder="用户名"
               value={username}
               onValueChange={setUsername}
               variant="bordered"
-              classNames={{ input: 'text-[#c8ccd0]', label: 'text-[#6b7280]' }}
+              classNames={{ input: 'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]' }}
             />
             <Input
-              label="密码"
+              placeholder="密码"
               type="password"
               value={password}
               onValueChange={setPassword}
               variant="bordered"
-              classNames={{ input: 'text-[#c8ccd0]', label: 'text-[#6b7280]' }}
+              classNames={{ input: 'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]' }}
             />
             {error && <p className="text-red-400 text-xs">{error}</p>}
-            <Button type="submit" isLoading={loading} className="bg-[#818cf8] text-white mt-2">
+            <Button type="submit" isLoading={loading} className="bg-[var(--accent)] text-white mt-2">
               登录
             </Button>
           </form>
-          <p className="text-[10px] text-[#6b7280] text-center mt-2">
+          <p className="text-[10px] text-[var(--text-muted)] text-center mt-2">
             测试账号: admin/admin123 | farmer1/123456 | farmer2/123456
           </p>
         </CardBody>

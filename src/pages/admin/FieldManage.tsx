@@ -42,10 +42,10 @@ export default function FieldManagePage() {
       tools={[]}
     >
       <div className="p-6 overflow-y-auto">
-        <h2 className="text-sm font-semibold text-[#c8ccd0] mb-4">田块管理</h2>
-        <table className="w-full text-xs text-[#9ca3af] border-collapse">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">田块管理</h2>
+        <table className="w-full text-xs text-[var(--text-body)] border-collapse">
           <thead>
-            <tr className="text-[#6b7280] border-b border-[#1e2430]">
+            <tr className="text-[var(--text-muted)] border-b border-[var(--border)]">
               <th className="text-left py-2 px-3">编号</th>
               <th className="text-left py-2 px-3">面积(亩)</th>
               <th className="text-left py-2 px-3">绑定用户</th>
@@ -55,10 +55,10 @@ export default function FieldManagePage() {
           </thead>
           <tbody>
             {fields.map(f => (
-              <tr key={f.id} className="border-b border-[#131820]">
-                <td className="py-2 px-3 text-[#c8ccd0]">{f.name}</td>
+              <tr key={f.id} className="border-b border-[var(--bg-panel)]">
+                <td className="py-2 px-3 text-[var(--text-primary)]">{f.name}</td>
                 <td className="py-2 px-3">{f.area}</td>
-                <td className="py-2 px-3">{f.ownerId ? (f.ownerId === 'u2' ? '张农户' : '李农户') : <span className="text-[#34d399]">空闲</span>}</td>
+                <td className="py-2 px-3">{f.ownerId ? (f.ownerId === 'u2' ? '张农户' : '李农户') : <span className="text-[var(--status-green)]">空闲</span>}</td>
                 <td className="py-2 px-3">{f.crop || '—'}</td>
                 <td className="py-2 px-3">{f.growthStage || '—'}</td>
               </tr>

@@ -10,9 +10,10 @@ interface Props {
   fields?: any[]
   selectedFieldId?: string
   onFieldClick?: (field: any) => void
+  focusLocation?: { lat: number; lng: number; zoom?: number } | null
 }
 
-export default function MapView({ fields = [], selectedFieldId, onFieldClick }: Props) {
+export default function MapView({ fields = [], selectedFieldId, onFieldClick, focusLocation }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const [searchText, setSearchText] = useState('')
@@ -79,16 +80,37 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick }: 
     if (!searchText.trim() || !mapRef.current) return
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&limit=1`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&limit=1`,
+        { headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' } }
       )
       const data = await res.json()
-      if (data[0]) {
+      if (data && data.length > 0) {
         mapRef.current.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 14)
+      } else {
+        // Fallback: try with "China" appended for better results
+        const res2 = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText + ' 中国')}&limit=1`,
+          { headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'HydroCS-Irrigation-App/1.0' } }
+        )
+        const data2 = await res2.json()
+        if (data2 && data2.length > 0) {
+          mapRef.current.setView([parseFloat(data2[0].lat), parseFloat(data2[0].lon)], 14)
+        }
       }
-    } catch {
-      mapRef.current.setView([30.25, 120.17], 14)
+    } catch (err) {
+      console.error('Search failed:', err)
     }
   }
+
+  // Fly to focus location (used when navigating from MyFields)
+  useEffect(() => {
+    if (focusLocation && mapRef.current) {
+      mapRef.current.setView([focusLocation.lat, focusLocation.lng], focusLocation.zoom || 15, {
+        animate: true,
+        duration: 1,
+      })
+    }
+  }, [focusLocation])
 
   // Field overlay
   useEffect(() => {
@@ -150,10 +172,10 @@ export default function MapView({ fields = [], selectedFieldId, onFieldClick }: 
           onChange={e => setSearchText(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSearch()}
           placeholder="搜索地点..."
-          className="w-60 px-3 py-1.5 text-xs bg-[#131820] border border-[#1e2430] rounded-md text-[#9ca3af] outline-none focus:border-[#818cf8]"
+          className="w-60 px-3 py-1.5 text-xs bg-[var(--bg-panel)] border border-[var(--border)] rounded-md text-[var(--text-body)] outline-none focus:border-[var(--accent)]"
         />
         <button onClick={handleSearch}
-          className="px-3 py-1.5 text-xs bg-[#131820] border border-[#1e2430] rounded-md text-[#9ca3af] hover:text-[#c8ccd0]">
+          className="px-3 py-1.5 text-xs bg-[var(--bg-panel)] border border-[var(--border)] rounded-md text-[var(--text-body)] hover:text-[var(--text-primary)]">
           搜索
         </button>
       </div>

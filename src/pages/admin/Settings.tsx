@@ -39,19 +39,19 @@ export default function SettingsPage() {
       ]}
     >
       <div className="p-6 overflow-y-auto">
-        <h2 className="text-sm font-semibold text-[#c8ccd0] mb-4">参数微调</h2>
-        <p className="text-xs text-[#6b7280] mb-4">以下功能按钮预留，暂无实际功能。</p>
+        <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">参数微调</h2>
+        <p className="text-xs text-[var(--text-muted)] mb-4">以下功能按钮预留，暂无实际功能。</p>
         <div className="flex flex-col gap-3 max-w-sm">
-          <button className="w-full py-2 text-xs text-[#9ca3af] bg-[#131820] border border-[#1e2430] rounded-md hover:text-[#c8ccd0]">
+          <button className="w-full py-2 text-xs text-[var(--text-body)] bg-[var(--bg-panel)] border border-[var(--border)] rounded-md hover:text-[var(--text-primary)]">
             上传最新气象数据
           </button>
-          <button className="w-full py-2 text-xs text-[#9ca3af] bg-[#131820] border border-[#1e2430] rounded-md hover:text-[#c8ccd0]">
+          <button className="w-full py-2 text-xs text-[var(--text-body)] bg-[var(--bg-panel)] border border-[var(--border)] rounded-md hover:text-[var(--text-primary)]">
             灌溉模型参数调整
           </button>
-          <button className="w-full py-2 text-xs text-[#9ca3af] bg-[#131820] border border-[#1e2430] rounded-md hover:text-[#c8ccd0]">
+          <button className="w-full py-2 text-xs text-[var(--text-body)] bg-[var(--bg-panel)] border border-[var(--border)] rounded-md hover:text-[var(--text-primary)]">
             田块识别阈值设置
           </button>
-          <button className="w-full py-2 text-xs text-[#9ca3af] bg-[#131820] border border-[#1e2430] rounded-md hover:text-[#c8ccd0]">
+          <button className="w-full py-2 text-xs text-[var(--text-body)] bg-[var(--bg-panel)] border border-[var(--border)] rounded-md hover:text-[var(--text-primary)]">
             系统通知配置
           </button>
         </div>

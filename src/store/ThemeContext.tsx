@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 
 interface ThemeContextType {
   isDark: boolean
@@ -8,9 +8,22 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType>({ isDark: true, toggle: () => {} })
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [isDark, setIsDark] = useState(true)
+  const [isDark, setIsDark] = useState(() => {
+    return document.documentElement.classList.contains('dark')
+  })
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  }, [isDark])
+
+  const toggle = () => setIsDark(prev => !prev)
+
   return (
-    <ThemeContext.Provider value={{ isDark, toggle: () => setIsDark(!isDark) }}>
+    <ThemeContext.Provider value={{ isDark, toggle }}>
       {children}
     </ThemeContext.Provider>
   )

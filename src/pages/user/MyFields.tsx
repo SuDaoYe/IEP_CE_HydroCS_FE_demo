@@ -51,30 +51,42 @@ export default function MyFieldsPage() {
       ]}
     >
       <div className="p-6 overflow-y-auto">
-        <h2 className="text-sm font-semibold text-[#c8ccd0] mb-4">我的田块</h2>
+        <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">我的田块</h2>
         {fields.length === 0 ? (
-          <p className="text-xs text-[#6b7280]">暂无绑定田块，请在地图上框选并绑定。</p>
+          <p className="text-xs text-[var(--text-muted)]">暂无绑定田块，请在地图上框选并绑定。</p>
         ) : (
           <div className="flex flex-col gap-3">
             {fields.map(f => (
-              <div key={f.id} className="bg-[#131820] border border-[#1e2430] rounded-lg p-4">
+              <div key={f.id} className="bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg p-4">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-sm text-[#c8ccd0] font-medium">{f.name}</h3>
-                    <p className="text-xs text-[#6b7280]">{f.area} 亩 · {f.crop} · {f.growthStage}</p>
-                    <p className="text-[10px] text-[#6b7280]">播种: {f.plantDate}</p>
+                    <h3 className="text-sm text-[var(--text-primary)] font-medium">{f.name}</h3>
+                    <p className="text-xs text-[var(--text-muted)]">{f.area} 亩 · {f.crop} · {f.growthStage}</p>
+                    <p className="text-[10px] text-[var(--text-muted)]">播种: {f.plantDate}</p>
                   </div>
                   <div className="text-right">
-                    <div className="text-[10px] text-[#6b7280]">本周预测灌溉</div>
-                    <div className="text-lg font-semibold text-[#818cf8]">
+                    <div className="text-[10px] text-[var(--text-muted)]">本周预测灌溉</div>
+                    <div className="text-lg font-semibold text-[var(--accent)]">
                       {irrigationData[f.id]?.[0]?.predicted ?? '—'} m³
                     </div>
                   </div>
                 </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => {
+                      const centerLat = f.bounds.reduce((s: number, b: [number, number]) => s + b[0], 0) / f.bounds.length
+                      const centerLng = f.bounds.reduce((s: number, b: [number, number]) => s + b[1], 0) / f.bounds.length
+                      navigate('/dashboard', { state: { focusField: { lat: centerLat, lng: centerLng, zoom: 15 } } })
+                    }}
+                    className="px-3 py-1 text-[10px] bg-[var(--accent)] text-white rounded hover:opacity-80"
+                  >
+                    在地图上显示
+                  </button>
+                </div>
                 {irrigationData[f.id] && irrigationData[f.id].length > 0 && (
-                  <table className="w-full mt-3 text-[10px] text-[#9ca3af] border-t border-[#1e2430] pt-2">
+                  <table className="w-full mt-3 text-[10px] text-[var(--text-body)] border-t border-[var(--border)] pt-2">
                     <thead>
-                      <tr className="text-[#6b7280]">
+                      <tr className="text-[var(--text-muted)]">
                         <th className="text-left py-1">日期</th>
                         <th className="text-left py-1">生长阶段</th>
                         <th className="text-right py-1">预测灌溉量</th>
@@ -85,7 +97,7 @@ export default function MyFieldsPage() {
                         <tr key={i}>
                           <td className="py-1">{r.date}</td>
                           <td className="py-1">{f.growthStage}</td>
-                          <td className="py-1 text-right text-[#818cf8]">{r.predicted} m³</td>
+                          <td className="py-1 text-right text-[var(--accent)]">{r.predicted} m³</td>
                         </tr>
                       ))}
                     </tbody>

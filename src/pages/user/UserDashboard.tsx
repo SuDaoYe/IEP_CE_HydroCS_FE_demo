@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/AuthContext'
 import { MapProvider } from '../../store/MapContext'
 import Layout from '../../components/Layout'
@@ -9,6 +9,14 @@ import type { Field } from '../../types'
 export default function UserDashboardPage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const focusField = (location.state as any)?.focusField || null
+  // Clear the state after reading
+  useEffect(() => {
+    if (location.state) {
+      window.history.replaceState({}, document.title)
+    }
+  }, [])
   const [nearbyFields, setNearbyFields] = useState<Field[]>([])
   const [selectedField, setSelectedField] = useState<Field | null>(null)
   const [, setMyFields] = useState<Field[]>([])
@@ -109,36 +117,37 @@ export default function UserDashboardPage() {
           fields={nearbyFields}
           selectedFieldId={selectedField?.id}
           onFieldClick={handleFieldSelect}
+          focusLocation={focusField}
         />
 
         {showBindDialog && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50">
-            <div className="bg-[#131820] border border-[#1e2430] rounded-lg p-6 w-80">
-              <h3 className="text-sm font-semibold text-[#c8ccd0] mb-4">绑定田块 {selectedField?.name}</h3>
+            <div className="bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg p-6 w-80">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-4">绑定田块 {selectedField?.name}</h3>
               <div className="flex flex-col gap-3">
                 <div>
-                  <label className="text-[10px] text-[#6b7280]">作物种类</label>
+                  <label className="text-[10px] text-[var(--text-muted)]">作物种类</label>
                   <input value={crop} onChange={e => setCrop(e.target.value)}
-                    className="w-full bg-[#0a0e17] border border-[#1e2430] rounded p-2 text-xs text-[#c8ccd0] mt-1"
+                    className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded p-2 text-xs text-[var(--text-primary)] mt-1"
                     placeholder="如: 小麦" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-[#6b7280]">生长周期</label>
+                  <label className="text-[10px] text-[var(--text-muted)]">生长周期</label>
                   <input value={growthStage} onChange={e => setGrowthStage(e.target.value)}
-                    className="w-full bg-[#0a0e17] border border-[#1e2430] rounded p-2 text-xs text-[#c8ccd0] mt-1"
+                    className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded p-2 text-xs text-[var(--text-primary)] mt-1"
                     placeholder="如: 拔节期" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-[#6b7280]">播种日期</label>
+                  <label className="text-[10px] text-[var(--text-muted)]">播种日期</label>
                   <input type="date" value={plantDate} onChange={e => setPlantDate(e.target.value)}
-                    className="w-full bg-[#0a0e17] border border-[#1e2430] rounded p-2 text-xs text-[#c8ccd0] mt-1" />
+                    className="w-full bg-[var(--bg-page)] border border-[var(--border)] rounded p-2 text-xs text-[var(--text-primary)] mt-1" />
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
                 <button onClick={() => setShowBindDialog(false)}
-                  className="flex-1 py-1.5 text-xs border border-[#1e2430] text-[#9ca3af] rounded-md">取消</button>
+                  className="flex-1 py-1.5 text-xs border border-[var(--border)] text-[var(--text-body)] rounded-md">取消</button>
                 <button onClick={handleBind}
-                  className="flex-1 py-1.5 text-xs bg-[#818cf8] text-white rounded-md">确认绑定</button>
+                  className="flex-1 py-1.5 text-xs bg-[var(--accent)] text-white rounded-md">确认绑定</button>
               </div>
             </div>
           </div>
