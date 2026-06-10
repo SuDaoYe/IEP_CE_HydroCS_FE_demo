@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国浇灌服务地图</title>
+    <!-- Leaflet 核心 CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- 地图容器样式 -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: "Microsoft Yahei", sans-serif;
+        }
+        
+        #map-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        .map-title {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 1000;
+        }
+        
+        .back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid #ccc;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 1000;
+            display: none;
+        }
+        
+        .back-btn:hover {
+            background: #f0f0f0;
+        }
+        
+        /* 地图区域样式 */
+        .geo-layer {
+            fill: #4CAF50; /* 浇灌主题绿色 */
+            fill-opacity: 0.7;
+            stroke: white;
+            stroke-width: 1;
+            cursor: pointer;
+        }
+        
+        .geo-layer:hover {
+            fill-opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-container">
+        <div class="map-title">中国浇灌服务地图</div>
+        <button class="back-btn" id="backBtn">返回上一级</button>
+    </div>
+
+    <!-- Leaflet 核心 JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 引入中国地理数据（已封装好的 GeoJSON 数据） -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/china.js"></script>
+    <script>
+        // 初始化地图
+        const map = L.map('map-container').setView([35.8617, 104.1954], 4); // 中国中心点经纬度
+        
+        // 添加地图底图（使用高德地图瓦片）
+        L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+            subdomains: ['1', '2', '3', '4'],
+            attribution: '© 高德地图',
+            maxZoom: 18,
+            minZoom: 3
+        }).addTo(map);
+
+        // 存储当前地图级别（1:全国 2:省份 3:地级市）
+        let currentLevel = 1;
+        // 存储当前选中的省份/城市信息
+        let currentRegion = null;
+        
+        // 地理数据加载函数
+        async function loadGeoData(level, code = '') {
+            let geoJsonData;
+            
+            try {
+                // 模拟不同级别的地理数据加载（实际项目中建议使用后端接口返回）
+                if (level === 1) {
+                    // 全国数据
+                    geoJsonData = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json').then(res => res.json());
+                } else if (level === 2) {
+                    // 省份数据（根据省份代码加载）
+                    geoJsonData = await fetch(`https://geo.datav.aliyun.com/areas_v3/bound/${code}_full.json`).then(res => res.json());
+                } else if (level === 3) {
+                    // 地级市数据（根据地级市代码加载）
+                    geoJsonData = await fetch(`https://geo.datav.aliyun.com/areas_v3/bound/${code}_full.json`).then(res => res.json());
+                }
+
+                // 清除现有图层
+                map.eachLayer(layer => {
+                    if (layer instanceof L.GeoJSON) {
+                        map.removeLayer(layer);
+                    }
+                });
+
+                // 添加新的地理图层
+                const geoLayer = L.geoJSON(geoJsonData, {
+                    style: () => ({
+                        fillColor: '#4CAF50',
+                        fillOpacity: 0.7,
+                        color: 'white',
+                        weight: 1
+                    }),
+                    onEachFeature: (feature, layer) => {
+                        // 添加鼠标悬浮提示
+                        layer.bindTooltip(feature.properties.name || '未知区域');
+                        
+                        // 绑定点击事件
+                        layer.on('click', () => {
+                            const adcode = feature.properties.adcode;
+                            const name = feature.properties.name;
+                            
+                            // 更新当前区域信息
+                            currentRegion = { adcode, name };
+                            
+                            // 逐级放大逻辑
+                            if (currentLevel === 1) {
+                                // 全国 -> 省份
+                                currentLevel = 2;
+                                map.setView(layer.getBounds().getCenter(), 7); // 放大到省份级别
+                                loadGeoData(2, adcode);
+                                document.getElementById('backBtn').style.display = 'block';
+                            } else if (currentLevel === 2) {
+                                // 省份 -> 地级市
+                                currentLevel = 3;
+                                map.setView(layer.getBounds().getCenter(), 9); // 放大到地级市级别
+                                loadGeoData(3, adcode);
+                            }
+                            
+                            // 更新标题
+                            document.querySelector('.map-title').textContent = `${name}浇灌服务地图`;
+                        });
+                    }
+                }).addTo(map);
+
+                // 适配地图视野
+                if (geoJsonData.features && geoJsonData.features.length > 0) {
+                    map.fitBounds(geoLayer.getBounds(), { padding: [50, 50] });
+                }
+
+            } catch (error) {
+                console.error('加载地理数据失败:', error);
+                alert('地图数据加载失败，请刷新重试');
+            }
+        }
+
+        // 返回上一级按钮事件
+        document.getElementById('backBtn').addEventListener('click', () => {
+            if (currentLevel === 3) {
+                // 地级市 -> 省份
+                currentLevel = 2;
+                loadGeoData(2, currentRegion.adcode.substring(0, 2) + '0000');
+                document.querySelector('.map-title').textContent = `${currentRegion.name.substring(0, 2)}浇灌服务地图`;
+            } else if (currentLevel === 2) {
+                // 省份 -> 全国
+                currentLevel = 1;
+                loadGeoData(1);
+                document.querySelector('.map-title').textContent = '中国浇灌服务地图';
+                document.getElementById('backBtn').style.display = 'none';
+            }
+        });
+
+        // 初始化加载全国地图
+        loadGeoData(1);
+    </script>
+</body>
+</html>
