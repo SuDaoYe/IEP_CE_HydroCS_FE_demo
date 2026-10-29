@@ -4,11 +4,12 @@ __pycache__/
 .venv/
 venv/
 
-# Runtime artefacts — rebuild with `python scripts/build_et_grid.py`
-server/artifacts/
+# 数据资产（server/artifacts/）随仓库发布，约 86 MB，clone 后可直接运行。
+# 下面这些属于运行期产物，不提交：
 server/.cache/
 server/data/
 server/.env
+server/artifacts/.et_src/
 
 # Node
 node_modules/
