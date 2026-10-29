@@ -99,6 +99,13 @@ export default function DetailPanel() {
 
   const cropSpec = crops.find((crop) => crop.key === field?.crop)
 
+  // 合计数字必须带时间尺度，所以把区间拼成一句可读的文案
+  const windowRange = plan
+    ? `${fmtDate(plan.window.start)} → ${fmtDate(
+        plan.series[plan.series.length - 1]?.date ?? plan.window.start,
+      )}`
+    : ''
+
   async function applyChange(patch: Record<string, unknown>) {
     if (!field) return
     setSaving(true)
@@ -285,10 +292,27 @@ export default function DetailPanel() {
                     ))}
                   </div>
 
+                  {/* 时间尺度必须写在数字旁边：这是“X 天合计”，不是当天值 */}
+                  <div className="rounded-lg border border-[var(--hc-line)] bg-[var(--hc-surface)] px-2 py-1.5">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-[var(--hc-muted)]">
+                        统计区间 <span className="hc-num text-[var(--hc-ink)]">{windowRange}</span>
+                      </span>
+                      <span className="hc-chip border-[var(--hc-accent)]/50 text-[var(--hc-accent)]">
+                        共 {plan.window.days} 天合计
+                      </span>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <div className="rounded-lg border border-[var(--hc-sky)]/40 bg-[var(--hc-sky)]/8 p-2">
-                      <div className="text-[9.5px] text-[var(--hc-sky)]">需要灌溉的水量（净）</div>
-                      <div className="hc-num text-[18px] font-semibold leading-tight text-[var(--hc-sky)]">
+                      <div className="text-[9.5px] leading-tight text-[var(--hc-sky)]">
+                        需要灌溉的水量（净）
+                        <span className="ml-1 rounded bg-[var(--hc-sky)]/14 px-1 py-0.5 text-[8.5px]">
+                          {plan.window.days} 天
+                        </span>
+                      </div>
+                      <div className="hc-num mt-0.5 text-[18px] font-semibold leading-tight text-[var(--hc-sky)]">
                         {fmtM3(plan.totals.net_volume_m3 ?? plan.totals.volume_m3)}
                       </div>
                       <div className="mt-0.5 text-[9px] text-[var(--hc-faint)]">
@@ -299,8 +323,13 @@ export default function DetailPanel() {
                       </div>
                     </div>
                     <div className="rounded-lg border border-[var(--hc-accent)]/40 bg-[var(--hc-accent)]/8 p-2">
-                      <div className="text-[9.5px] text-[var(--hc-accent)]">总水量（毛，含损失）</div>
-                      <div className="hc-num text-[18px] font-semibold leading-tight text-[var(--hc-accent)]">
+                      <div className="text-[9.5px] leading-tight text-[var(--hc-accent)]">
+                        总水量（毛，含损失）
+                        <span className="ml-1 rounded bg-[var(--hc-accent)]/14 px-1 py-0.5 text-[8.5px]">
+                          {plan.window.days} 天
+                        </span>
+                      </div>
+                      <div className="hc-num mt-0.5 text-[18px] font-semibold leading-tight text-[var(--hc-accent)]">
                         {fmtM3(plan.totals.gross_volume_m3 ?? plan.totals.volume_m3)}
                       </div>
                       <div className="mt-0.5 text-[9px] text-[var(--hc-faint)]">

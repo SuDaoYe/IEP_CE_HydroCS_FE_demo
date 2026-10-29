@@ -34,13 +34,18 @@ export default function MyFields() {
           <div>
             <h1 className="text-[17px] font-semibold text-[var(--hc-ink)]">我的田块</h1>
             <p className="mt-1 text-[11.5px] text-[var(--hc-faint)]">
-              每块地的面积、作物生育期与未来 7 天灌溉需水量
+              每块地的面积、作物生育期与未来一段时间的灌溉需水量（合计都标注了统计天数）
             </p>
           </div>
           <div className="flex gap-5">
             <Stat label="田块数" value={fields.length} size="sm" />
             <Stat label="总面积" value={fmtMu(totals?.area_mu ?? 0)} size="sm" />
-            <Stat label="7 天需水" value={fmtM3(totals?.week_m3 ?? 0)} accent size="sm" />
+            <Stat
+              label={`${summary?.days ?? 7} 天需水`}
+              value={fmtM3(totals?.week_m3 ?? 0)}
+              accent
+              size="sm"
+            />
           </div>
         </div>
 
@@ -75,13 +80,13 @@ export default function MyFields() {
                       <div className="flex items-end justify-between gap-2">
                         <div className="flex gap-3">
                           <Stat
-                            label="7 天需灌（净）"
+                            label={`${summary?.days ?? 7} 天需灌（净）`}
                             value={fmtM3(entry.totals.net_volume_m3 ?? entry.totals.volume_m3)}
                             accent
                             size="md"
                           />
                           <Stat
-                            label="7 天总水量（毛）"
+                            label={`${summary?.days ?? 7} 天总水量（毛）`}
                             value={fmtM3(entry.totals.volume_m3)}
                             size="md"
                           />
@@ -116,7 +121,9 @@ export default function MyFields() {
                           </div>
                         </div>
                         <div>
-                          <div className="text-[var(--hc-faint)]">7 天有效降雨</div>
+                          <div className="text-[var(--hc-faint)]">
+                            {summary?.days ?? 7} 天有效降雨
+                          </div>
                           <div className="hc-num text-[var(--hc-ink)]">
                             {fmtMm(entry.totals.pe_mm ?? 0)}
                           </div>

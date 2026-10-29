@@ -65,7 +65,7 @@ export default function FieldSheet() {
                 {fieldCount} 块 · {fmtMu(areaMu)}
               </span>
               <span className="text-[11px] text-[var(--hc-muted)]">
-                7 天合计{' '}
+                {summary?.days ?? 7} 天合计{' '}
                 <span className="hc-num text-[var(--hc-accent)]">
                   {totals ? fmtM3(totals.week_m3) : '—'}
                 </span>
@@ -132,11 +132,15 @@ export default function FieldSheet() {
         />
         <Stat label="今日供水（毛）" value={totals ? fmtM3(totals.daily_m3) : '—'} size="sm" />
         <Stat
-          label="7 天需灌"
+          label={`${summary?.days ?? 7} 天需灌`}
           value={totals ? fmtM3(totals.week_net_m3 ?? totals.week_m3) : '—'}
           size="sm"
         />
-        <Stat label="7 天总水量" value={totals ? fmtM3(totals.week_m3) : '—'} size="sm" />
+        <Stat
+          label={`${summary?.days ?? 7} 天总水量`}
+          value={totals ? fmtM3(totals.week_m3) : '—'}
+          size="sm"
+        />
         <Stat label="覆盖面积" value={fmtMu(areaMu)} size="sm" />
         <span className="ml-auto text-[10px] text-[var(--hc-faint)]">
           净 = 补进根区的水量；毛 = 计入输水/灌溉损失后从水源取的水量
