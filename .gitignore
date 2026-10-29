@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime artefacts — rebuild with `python scripts/build_et_grid.py`
+server/artifacts/
+server/.cache/
+server/data/
+server/.env
+
+# Node
+node_modules/
+web/dist/
+.pnpm-store/
+
+# Local scratch
+**/.scratch/
+**/scripts/*.png
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

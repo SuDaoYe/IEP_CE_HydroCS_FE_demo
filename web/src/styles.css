@@ -1,0 +1,223 @@
+@import 'tailwindcss';
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+@theme {
+  --color-canvas: #0a0e13;
+  --color-surface: #111820;
+  --color-surface-2: #16202a;
+  --color-line: #1e2a36;
+  --color-line-strong: #2a3a49;
+  --color-ink: #e7eef5;
+  --color-muted: #93a2b1;
+  --color-faint: #5d6b7a;
+  --color-accent: #35d399;
+  --color-accent-dim: #1f7d5c;
+  --color-sky: #4aa8f0;
+  --color-amber: #f5b544;
+  --color-danger: #f2705f;
+
+  --font-sans: 'Inter var', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Mono', 'Roboto Mono', ui-monospace, monospace;
+
+  --radius-panel: 14px;
+}
+
+:root {
+  color-scheme: dark;
+  --hc-canvas: #0a0e13;
+  --hc-surface: #111820;
+  --hc-surface-2: #16202a;
+  --hc-line: #1e2a36;
+  --hc-ink: #e7eef5;
+  --hc-muted: #93a2b1;
+  --hc-faint: #5d6b7a;
+  --hc-accent: #35d399;
+  --hc-sky: #4aa8f0;
+  --hc-amber: #f5b544;
+  --hc-danger: #f2705f;
+  --hc-shadow: 0 18px 48px -24px rgba(0, 0, 0, 0.9);
+}
+
+html.hc-light {
+  color-scheme: light;
+  --hc-canvas: #eef1f4;
+  --hc-surface: #ffffff;
+  --hc-surface-2: #f4f6f8;
+  --hc-line: #dde3ea;
+  --hc-ink: #101b26;
+  --hc-muted: #5b6875;
+  --hc-faint: #8a96a3;
+  --hc-accent: #12a06f;
+  --hc-sky: #1c7fd1;
+  --hc-amber: #b97608;
+  --hc-danger: #c8432e;
+  --hc-shadow: 0 18px 40px -26px rgba(16, 27, 38, 0.45);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--hc-canvas);
+  color: var(--hc-ink);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-feature-settings: 'tnum' 1;
+  overscroll-behavior: none;
+}
+
+/* Thin, quiet scrollbars — panels are dense with numbers. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hc-line);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .hc-panel {
+    background: var(--hc-surface);
+    border: 1px solid var(--hc-line);
+    border-radius: var(--radius-panel);
+  }
+
+  .hc-hairline {
+    border-color: var(--hc-line);
+  }
+
+  .hc-label {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--hc-faint);
+    font-weight: 600;
+  }
+
+  .hc-num {
+    font-family: var(--font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  .hc-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 40px;
+    padding: 0 0.85rem;
+    border-radius: 10px;
+    border: 1px solid var(--hc-line);
+    background: var(--hc-surface-2);
+    color: var(--hc-ink);
+    font-size: 13px;
+    font-weight: 500;
+    transition:
+      background 140ms ease,
+      border-color 140ms ease,
+      transform 90ms ease;
+  }
+  .hc-btn:active {
+    transform: scale(0.985);
+  }
+  .hc-btn:hover {
+    border-color: var(--color-line-strong, #2a3a49);
+  }
+  .hc-btn-primary {
+    background: var(--hc-accent);
+    border-color: transparent;
+    color: #05231a;
+    font-weight: 650;
+  }
+  .hc-btn-ghost {
+    background: transparent;
+  }
+  .hc-btn:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  .hc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--hc-line);
+    background: color-mix(in srgb, var(--hc-surface-2) 80%, transparent);
+    font-size: 11px;
+    color: var(--hc-muted);
+  }
+
+  .hc-input {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 0.7rem;
+    border-radius: 10px;
+    border: 1px solid var(--hc-line);
+    background: var(--hc-surface-2);
+    color: var(--hc-ink);
+    font-size: 13px;
+    outline: none;
+  }
+  .hc-input:focus {
+    border-color: var(--hc-accent);
+  }
+  .hc-input::placeholder {
+    color: var(--hc-faint);
+  }
+}
+
+@keyframes hc-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+.hc-pulse {
+  animation: hc-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes hc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hc-rise {
+  animation: hc-rise 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* MapLibre overrides: the default chrome fights the dark instrument look. */
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-logo {
+  display: none !important;
+}
+.maplibregl-canvas:focus {
+  outline: none;
+}
+
+.hc-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
