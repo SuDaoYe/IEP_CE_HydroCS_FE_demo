@@ -6,6 +6,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from functools import lru_cache
+from pathlib import Path
+from pickle import UnpicklingError
 from typing import Any
 
 import numpy as np
@@ -20,21 +22,61 @@ WEATHER_FEATURES = (
     "temperature_c", "vpd_kpa", "wind10_m_s", "net_radiation_mj_m2_day",
     "pressure_kpa", "precipitation_mm_day",
 )
-MEAN_WINDOWS = (1, 3, 7, 14, 30, WINDOW)
 
 
 class ForecastUnavailable(Exception):
     """The bundled model or meteorological history cannot be loaded."""
 
 
-def rf_inputs(history: np.ndarray) -> np.ndarray:
-    """Build rolling means of the six weather variables for direct ET prediction."""
-    return np.concatenate([history[:, -days:].mean(axis=1) for days in MEAN_WINDOWS], axis=1)
+class LstmForecaster:
+    def __init__(self, path: Path):
+        import torch
+        from torch import nn
+
+        bundle = torch.load(path, map_location="cpu", weights_only=True)
+        contract = bundle["contract"]
+        if (
+            bundle["kind"] != "lstm" or bundle["window"] != WINDOW
+            or contract["schema"] != "past60_daily_et_v1"
+            or contract["window_days"] != WINDOW
+            or (contract["input_first_day_offset"], contract["input_last_day_offset"]) != (-WINDOW, -1)
+            or tuple(contract["features"]) != WEATHER_FEATURES
+            or bundle["trained_through"] != (START - timedelta(days=1)).isoformat()
+        ):
+            raise ValueError("unexpected 60-day LSTM checkpoint")
+        params = bundle["params"]
+        self.network = nn.ModuleDict({
+            "body": nn.LSTM(len(WEATHER_FEATURES), params["hidden"], params["layers"], batch_first=True),
+            "output": nn.Linear(params["hidden"], 1),
+        })
+        self.network.load_state_dict(bundle["state_dict"])
+        self.network.eval()
+        scaler = bundle["scaler"]
+        self.x_mean = np.asarray(scaler["x_mean"], dtype=np.float32)
+        self.x_std = np.asarray(scaler["x_std"], dtype=np.float32)
+        self.y_mean = float(scaler["y_mean"])
+        self.y_std = float(scaler["y_std"])
+        if (
+            self.x_mean.shape != (len(WEATHER_FEATURES),) or self.x_std.shape != self.x_mean.shape
+            or not np.isfinite(self.x_mean).all() or not np.isfinite(self.x_std).all()
+            or (self.x_std <= 0).any()
+            or not np.isfinite([self.y_mean, self.y_std]).all() or self.y_std <= 0
+        ):
+            raise ValueError("invalid LSTM normalization parameters")
+
+    def predict(self, history: np.ndarray) -> np.ndarray:
+        import torch
+
+        normalized = ((history - self.x_mean) / self.x_std).astype(np.float32)
+        with torch.inference_mode():
+            encoded, _ = self.network["body"](torch.from_numpy(normalized))
+            values = self.network["output"](encoded[:, -1]).squeeze(-1).numpy()
+        return np.maximum(values * self.y_std + self.y_mean, 0)
 
 
 @dataclass(frozen=True)
 class ForecastAssets:
-    model: Any
+    model: LstmForecaster
     weather: np.ndarray
     date_index: dict[date, int]
     lat: np.ndarray
@@ -45,8 +87,6 @@ class ForecastAssets:
 @lru_cache(maxsize=1)
 def load() -> ForecastAssets:
     try:
-        import joblib
-
         with np.load(ARTIFACTS_DIR / "et_forecast_weather.npz", allow_pickle=False) as data:
             weather, lat, lon, trained = (data[key] for key in ("weather", "lat", "lon", "trained"))
             date_index = {date.fromisoformat(day): i for i, day in enumerate(data["dates"].astype(str))}
@@ -57,12 +97,9 @@ def load() -> ForecastAssets:
             or trained.shape != (len(lat), len(lon))
         ):
             raise ValueError("unexpected weather grid shape")
-        # This fixed path is for the model shipped with the server. User uploads never use it.
-        model = joblib.load(ARTIFACTS_DIR / "et_forecast_rf.joblib")
-        if model.n_features_in_ != len(WEATHER_FEATURES) * len(MEAN_WINDOWS):
-            raise ValueError("unexpected random forest feature count")
+        model = LstmForecaster(ARTIFACTS_DIR / "et_forecast_lstm.pt")
         return ForecastAssets(model, weather, date_index, lat, lon, trained)
-    except (OSError, EOFError, ImportError, ValueError, KeyError, AttributeError) as exc:
+    except (OSError, EOFError, ImportError, ValueError, KeyError, RuntimeError, UnpicklingError) as exc:
         raise ForecastUnavailable("蒸散发模型或历史气象资产无法加载") from exc
 
 
@@ -98,10 +135,10 @@ def predict(rings: list[geo.Ring], target: date) -> dict[str, Any]:
     history = assets.weather[np.asarray(days)[:, None], rows, cols].transpose(1, 0, 2)
     if not np.isfinite(history).all():
         raise ValueError("田块网格缺少完整的 60 天历史气象")
-    daily_et = assets.model.predict(rf_inputs(history))
+    daily_et = assets.model.predict(history)
     return {
         "date": target.isoformat(),
-        "model": "era5-rf-direct-60d",
+        "model": "era5-lstm-direct-60d",
         "et_mm_day": round(float(np.average(daily_et, weights=list(weights.values()))), 3),
         "history_start": first.isoformat(),
         "history_end": last.isoformat(),

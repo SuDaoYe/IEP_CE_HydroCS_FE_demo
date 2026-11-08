@@ -221,7 +221,7 @@ def test_field_et_forecast_uses_historical_window(client):
     response = client.get(endpoint, headers=headers, params=query)
     assert response.status_code == 200, response.text
     forecast = response.json()
-    assert forecast["model"] == "era5-rf-direct-60d"
+    assert forecast["model"] == "era5-lstm-direct-60d"
     assert forecast["history_start"] == "2004-05-16"
     assert forecast["history_end"] == "2004-07-14"
     assert forecast["cells"] == 2

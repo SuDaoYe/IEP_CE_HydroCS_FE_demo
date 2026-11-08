@@ -28,7 +28,7 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
         蒸散发模型预测
       </SectionTitle>
       <p className="mb-2 text-[11px] leading-relaxed text-[var(--hc-muted)]">
-        随机森林用前 60 天的六项 ERA5 气象直接预测单日蒸散发（ETMonitor 口径）。灌溉需水量另行计算。
+        60 天 LSTM 读取六项 ERA5 逐日气象，直接预测目标日的蒸散发（ETMonitor 口径）。灌溉需水量另行计算。
       </p>
       <form
         className="flex flex-wrap items-center gap-2"
