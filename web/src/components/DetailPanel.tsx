@@ -6,6 +6,7 @@ import { useData } from '../store/data'
 import { useIrrigation } from '../store/irrigation'
 import { useUI } from '../store/ui'
 import { flyToField } from './mapBridge'
+import EtForecast from './EtForecast'
 import IrrigationChart from './IrrigationChart'
 import { Empty, Icon, SectionTitle, Spinner, Stat } from './ui'
 import type { Crop, WaterBucket } from '../types'
@@ -401,6 +402,8 @@ export default function DetailPanel() {
                 <div className="py-6 text-center text-[11px] text-[var(--hc-faint)]">暂无解算结果</div>
               )}
             </div>
+
+            <EtForecast key={`${field.id}-${field.rev}`} fieldId={field.id} />
 
             {/* actions */}
             <div className="grid grid-cols-2 gap-2">

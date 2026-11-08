@@ -1,6 +1,7 @@
 import type {
   AdminStats,
   Crop,
+  EtForecastResult,
   Field,
   FsListing,
   HistoryLog,
@@ -107,6 +108,8 @@ export const api = {
     request<IrrigationPlan>(
       `/fields/${id}/irrigation?days=${days}${start ? `&start=${start}` : ''}`,
     ),
+  etForecast: (id: string, date: string) =>
+    request<EtForecastResult>(`/fields/${id}/et-forecast?date=${encodeURIComponent(date)}`),
 
   // --- recognition & irrigation ---
   segment: (data: {

@@ -73,6 +73,14 @@ export interface SegmentResult {
   cached?: boolean
 }
 
+export interface EtForecastResult {
+  date: string
+  et_mm_day: number
+  history_start: string
+  history_end: string
+  cells: number
+}
+
 export interface IrrigationDay {
   date: string
   et0_mm: number

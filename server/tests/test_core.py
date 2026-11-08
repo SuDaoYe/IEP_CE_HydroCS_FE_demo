@@ -203,6 +203,34 @@ def test_other_farmers_field_is_hidden(client):
     assert response.status_code == 404
 
 
+def test_field_et_forecast_uses_historical_window(client):
+    headers = auth_headers(client)
+    created = client.post("/api/v1/fields", headers=headers, json={
+        "name": "跨格预测测试田",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [116.120, 36.01], [116.130, 36.01], [116.130, 36.02],
+                [116.120, 36.02], [116.120, 36.01],
+            ]],
+        },
+    })
+    assert created.status_code == 201, created.text
+    endpoint = f"/api/v1/fields/{created.json()['id']}/et-forecast"
+    query = {"date": "2004-07-15"}
+    response = client.get(endpoint, headers=headers, params=query)
+    assert response.status_code == 200, response.text
+    forecast = response.json()
+    assert forecast["model"] == "penman-rf-residual-60d"
+    assert forecast["history_start"] == "2004-05-16"
+    assert forecast["history_end"] == "2004-07-14"
+    assert forecast["cells"] == 2
+    assert 0 < forecast["et_mm_day"] < 20
+    assert client.get(endpoint, headers=headers, params={"date": "2026-07-15"}).status_code == 422
+    other = auth_headers(client, "farmer2", "123456")
+    assert client.get(endpoint, headers=other, params=query).status_code == 404
+
+
 def test_admin_guard(client):
     headers = auth_headers(client)
     assert client.get("/api/v1/admin/users", headers=headers).status_code == 403

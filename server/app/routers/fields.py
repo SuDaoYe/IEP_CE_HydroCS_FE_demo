@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from .. import db, deps, repository
 from ..schemas import FieldCreate, FieldOut, FieldUpdate
-from ..services import geo, irrigation
+from ..services import et_forecast, geo, irrigation
 from ..services import params as parameter_service
 
 router = APIRouter(prefix="/fields", tags=["fields"])
@@ -138,6 +138,22 @@ def field_irrigation(
             ),
         )
     return plan
+
+
+@router.get("/{field_id}/et-forecast")
+def field_et_forecast(field_id: str, date: dt.date, user: deps.CurrentUser) -> dict[str, Any]:
+    try:
+        row = repository.get_field(field_id, user["id"], allow_any=user["role"] == "admin")
+    except repository.FieldError as exc:
+        _raise(exc)
+        raise  # pragma: no cover
+    rings = geo.rings_from_geojson(json.loads(row["geom_json"]))
+    try:
+        return et_forecast.predict(rings, date)
+    except et_forecast.ForecastUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/catalog/crops")
