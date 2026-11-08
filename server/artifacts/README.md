@@ -19,7 +19,7 @@ python -m uvicorn app.main:app --port 8000
 | `admin/towns.json` | 1.1 MB | 乡镇索引（32,199 条，已剔除街道） | 同上 |
 | `admin/villages.txt` | 19.7 MB | 村级索引（498,502 条，`名称<TAB>编码<TAB>区县码`） | 同上 |
 | `weights/4.102_best.pt` | 19.6 MB | YOLO11s-seg 农田分割权重（单类 farmland） | 来自 `农田识别分割` 交付包 |
-| `et_forecast_rf.joblib` | 约 30 MB | 用目标日前 60 天气象预测日 ETMonitor 蒸散发的随机森林残差模型 | `scripts/build_et_forecast.py` |
+| `et_forecast_rf.joblib` | 约 32 MB | 用目标日前 60 天 ERA5 气象直接预测日 ETMonitor 蒸散发的随机森林 | `scripts/build_et_forecast.py` |
 | `et_forecast_weather.npz` | 约 8 MB | 2004 年历史回放所需的六项 ERA5 气象与覆盖掩膜 | 同上 |
 | `et_forecast_benchmark.json` | < 1 KB | 同一批 2004 年样本上的 RF、60 天 LSTM 指标 | 同上 |
 

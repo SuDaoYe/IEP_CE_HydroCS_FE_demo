@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from ..config import ARTIFACTS_DIR
-from . import era5, geo, gridmath
+from . import geo, gridmath
 
 WINDOW = 60
 START = date(2004, 1, 1)
@@ -27,16 +27,9 @@ class ForecastUnavailable(Exception):
     """The bundled model or meteorological history cannot be loaded."""
 
 
-def model_inputs(
-    history: np.ndarray, lat: np.ndarray, lon: np.ndarray, day_of_year: int | np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Build RF inputs and the preceding day's physical reference ET baseline."""
-    weather = np.concatenate([history[:, -n:].mean(axis=1) for n in MEAN_WINDOWS], axis=1)
-    temperature, vpd, wind, radiation, pressure, _ = weather[:, :6].T
-    baseline = era5.penman_monteith(temperature, vpd, wind.astype(np.float64), radiation, pressure)
-    season = np.broadcast_to((day_of_year - 1) * (2 * np.pi / 365.25), lat.shape)
-    features = np.column_stack((weather, baseline, lat, lon, np.sin(season), np.cos(season)))
-    return features.astype(np.float32), baseline
+def rf_inputs(history: np.ndarray) -> np.ndarray:
+    """Build rolling means of the six weather variables for direct ET prediction."""
+    return np.concatenate([history[:, -days:].mean(axis=1) for days in MEAN_WINDOWS], axis=1)
 
 
 @dataclass(frozen=True)
@@ -66,7 +59,7 @@ def load() -> ForecastAssets:
             raise ValueError("unexpected weather grid shape")
         # This fixed path is for the model shipped with the server. User uploads never use it.
         model = joblib.load(ARTIFACTS_DIR / "et_forecast_rf.joblib")
-        if model.n_features_in_ != len(WEATHER_FEATURES) * len(MEAN_WINDOWS) + 5:
+        if model.n_features_in_ != len(WEATHER_FEATURES) * len(MEAN_WINDOWS):
             raise ValueError("unexpected random forest feature count")
         return ForecastAssets(model, weather, date_index, lat, lon, trained)
     except (OSError, EOFError, ImportError, ValueError, KeyError, AttributeError) as exc:
@@ -105,11 +98,10 @@ def predict(rings: list[geo.Ring], target: date) -> dict[str, Any]:
     history = assets.weather[np.asarray(days)[:, None], rows, cols].transpose(1, 0, 2)
     if not np.isfinite(history).all():
         raise ValueError("田块网格缺少完整的 60 天历史气象")
-    features, baseline = model_inputs(history, assets.lat[rows], assets.lon[cols], target.timetuple().tm_yday)
-    daily_et = np.maximum(0, baseline + assets.model.predict(features))
+    daily_et = assets.model.predict(rf_inputs(history))
     return {
         "date": target.isoformat(),
-        "model": "penman-rf-residual-60d",
+        "model": "era5-rf-direct-60d",
         "et_mm_day": round(float(np.average(daily_et, weights=list(weights.values()))), 3),
         "history_start": first.isoformat(),
         "history_end": last.isoformat(),

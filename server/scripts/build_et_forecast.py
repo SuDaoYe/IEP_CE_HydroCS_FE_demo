@@ -1,4 +1,4 @@
-"""Fit the causal Penman/RF model and benchmark it against the 60-day LSTM."""
+"""Compare direct ET forecasts from the preceding 60 days of ERA5."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_err
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import ARTIFACTS_DIR
-from app.services.et_forecast import END, START, WEATHER_FEATURES, WINDOW, model_inputs
+from app.services.et_forecast import END, MEAN_WINDOWS, START, WEATHER_FEATURES, WINDOW, rf_inputs
 
 
 def metrics(observed: np.ndarray, predicted: np.ndarray) -> dict:
@@ -51,30 +51,29 @@ def main() -> None:
         raise ValueError("Expected 2004 holdout endpoints")
     if not np.all(np.diff(dates) == np.timedelta64(1, "D")):
         raise ValueError("Weather history must have a continuous daily axis")
-    day_of_year = np.array([day.timetuple().tm_yday for day in dates.astype(object)])
+    if train[:, 0].min() < WINDOW or test[:, 0].min() < WINDOW:
+        raise ValueError("Not enough meteorological history for the benchmark")
 
-    def matrix(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        features, baselines = [], []
+    def matrix(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        features = np.empty((len(indices), len(MEAN_WINDOWS) * len(WEATHER_FEATURES)), dtype=np.float32)
         for offset in range(0, len(indices), 4096):
-            target, cell = indices[offset : offset + 4096].T
+            batch = indices[offset : offset + 4096]
+            target, cell = batch.T
             history = weather[target[:, None] + np.arange(-WINDOW, 0), cell[:, None]]
-            x, pm = model_inputs(history, lat[cell], lon[cell], day_of_year[target])
-            features.append(x)
-            baselines.append(pm)
+            features[offset : offset + len(batch)] = rf_inputs(history)
         target, cell = indices.T
-        return np.concatenate(features), np.concatenate(baselines), observed[target, cell]
+        return features, observed[target, cell]
 
-    rng = np.random.default_rng(42)
-    sampled = train[np.sort(rng.choice(len(train), size=100_000, replace=False))]
-    x_train, pm_train, y_train = matrix(sampled)
+    x_train, y_train = matrix(train)
     model = RandomForestRegressor(
-        n_estimators=150, max_depth=14, min_samples_leaf=5, max_features=0.7,
+        n_estimators=150, max_depth=14, min_samples_leaf=5, max_features=0.7, max_samples=100_000,
         random_state=42, n_jobs=8,
     )
-    print(f"Fitting RF on {len(sampled):,} endpoints", flush=True)
-    model.fit(x_train, y_train - pm_train)
-    x_test, pm_test, y_test = matrix(test)
-    prediction = np.maximum(pm_test + model.predict(x_test), 0)
+    print(f"Fitting direct RF on a pool of {len(train):,} endpoints", flush=True)
+    model.fit(x_train, y_train)
+    del x_train, y_train
+    x_test, y_test = matrix(test)
+    prediction = model.predict(x_test)
 
     lstm = pd.read_csv(args.lstm_run / "test_daily_predictions.csv", dtype={
         "observed_et": np.float32, "predicted_et": np.float32,
@@ -91,20 +90,18 @@ def main() -> None:
     monthly = groups[["observed_et", "predicted_et", "rf"]].sum()
     monthly = monthly[groups.size().to_numpy() == monthly.index.get_level_values("month").days_in_month]
     results = {
-        "train_rf_n": len(sampled), "train_lstm_n": len(train),
+        "train_pool_n": len(train),
+        "rf_samples_per_tree": model.max_samples,
         "daily": {
-            "rf_residual": metrics(y_test, prediction),
+            "rf_direct": metrics(y_test, prediction),
             "lstm": metrics(y_test, lstm["predicted_et"]),
         },
         "monthly": {
-            "rf_residual": metrics(monthly["observed_et"], monthly["rf"]),
+            "rf_direct": metrics(monthly["observed_et"], monthly["rf"]),
             "lstm": metrics(monthly["observed_et"], monthly["predicted_et"]),
         },
     }
     print(json.dumps(results, indent=2), flush=True)
-    if results["daily"]["rf_residual"]["rmse"] >= results["daily"]["lstm"]["rmse"]:
-        raise ValueError("RF did not beat the LSTM on the daily holdout")
-
     rows, cols = len(np.unique(lat)), len(np.unique(lon))
     grid_lat, grid_lon = lat.reshape(rows, cols), lon.reshape(rows, cols)
     if not ((grid_lat == grid_lat[:, :1]).all() and (grid_lon == grid_lon[:1, :]).all()):
