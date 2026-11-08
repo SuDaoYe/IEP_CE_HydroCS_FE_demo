@@ -226,6 +226,30 @@ def test_field_et_forecast_uses_historical_window(client):
     assert forecast["history_end"] == "2004-07-14"
     assert forecast["cells"] == 2
     assert 0 < forecast["et_mm_day"] < 20
+    day, week, month = (forecast["periods"][key] for key in ("day", "week", "month"))
+    assert (day["start"], day["end"], day["et_mm"]) == (
+        "2004-07-15", "2004-07-15", forecast["et_mm_day"],
+    )
+    assert (week["start"], week["end"]) == ("2004-07-16", "2004-07-22")
+    assert (month["start"], month["end"]) == ("2004-07-16", "2004-08-14")
+    for period, days in ((day, 1), (week, 7), (month, 30)):
+        assert (period["days"], period["et_days"], period["irrigation_days"]) == (days, days, days)
+        assert period["gross_volume_m3"] == pytest.approx(
+            period["net_volume_m3"] / forecast["efficiency"], abs=0.02,
+        )
+    assert 0 < week["et_mm"] <= month["et_mm"]
+    assert 0 <= week["net_volume_m3"] <= month["net_volume_m3"]
+
+    year_end = client.get(endpoint, headers=headers, params={"date": "2004-12-27"})
+    assert year_end.status_code == 200, year_end.text
+    partial = year_end.json()["periods"]["week"]
+    assert partial["end"] == "2005-01-03"
+    assert (partial["et_days"], partial["irrigation_days"]) == (4, 3)
+    last_day = client.get(endpoint, headers=headers, params={"date": "2004-12-31"}).json()
+    assert last_day["periods"]["day"]["et_days"] == 1
+    assert last_day["periods"]["day"]["net_volume_m3"] is None
+    assert last_day["periods"]["month"]["et_mm"] is None
+
     assert client.get(endpoint, headers=headers, params={"date": "2026-07-15"}).status_code == 422
     other = auth_headers(client, "farmer2", "123456")
     assert client.get(endpoint, headers=other, params=query).status_code == 404

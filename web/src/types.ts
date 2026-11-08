@@ -73,12 +73,25 @@ export interface SegmentResult {
   cached?: boolean
 }
 
+export interface EtForecastPeriod {
+  start: string
+  end: string
+  days: number
+  et_days: number
+  irrigation_days: number
+  et_mm: number | null
+  net_volume_m3: number | null
+  gross_volume_m3: number | null
+}
+
 export interface EtForecastResult {
   date: string
   et_mm_day: number
   history_start: string
   history_end: string
   cells: number
+  efficiency: number
+  periods: Record<'day' | 'week' | 'month', EtForecastPeriod>
 }
 
 export interface IrrigationDay {

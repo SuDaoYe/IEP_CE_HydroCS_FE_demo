@@ -1,7 +1,44 @@
 import { useState } from 'react'
 import { api } from '../lib/api'
-import type { EtForecastResult } from '../types'
+import { fmtDate, fmtM3, fmtMm, fmtNumber } from '../lib/format'
+import type { EtForecastPeriod, EtForecastResult } from '../types'
 import { SectionTitle, Spinner } from './ui'
+
+const PERIODS = [
+  { key: 'day', label: '所选当天' },
+  { key: 'week', label: '后 7 天' },
+  { key: 'month', label: '后 30 天' },
+] as const
+
+function PeriodResult({ label, period }: { label: string; period: EtForecastPeriod }) {
+  const full = period.et_days === period.days && period.irrigation_days === period.days
+  return (
+    <article aria-label={label} className="rounded-lg border border-[var(--hc-line)] px-2.5 py-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+        <h3 className="text-[12px] font-medium text-[var(--hc-ink)]">{label}</h3>
+        <span className="text-[10px] text-[var(--hc-muted)]">
+          {fmtDate(period.start)}{period.days > 1 && ` 至 ${fmtDate(period.end)}`}
+        </span>
+      </div>
+      <p className="mt-0.5 text-[11px] text-[var(--hc-muted)]">预测蒸散 {fmtMm(period.et_mm)}</p>
+      <dl className="mt-1 grid grid-cols-2 gap-2">
+        <div>
+          <dt className="text-[10px] text-[var(--hc-muted)]">净补水</dt>
+          <dd className="hc-num text-[16px] text-[var(--hc-sky)]">{fmtM3(period.net_volume_m3)}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] text-[var(--hc-muted)]">毛供水（含损失）</dt>
+          <dd className="hc-num text-[16px] text-[var(--hc-accent)]">{fmtM3(period.gross_volume_m3)}</dd>
+        </div>
+      </dl>
+      {!full && (
+        <p className="mt-1 text-[10px] text-[var(--hc-amber)]">
+          仅累计有数据的日期 · 蒸散 {period.et_days}/{period.days} 天 · 补水 {period.irrigation_days}/{period.days} 天
+        </p>
+      )}
+    </article>
+  )
+}
 
 export default function EtForecast({ fieldId }: { fieldId: string }) {
   const [date, setDate] = useState('2004-07-15')
@@ -28,7 +65,7 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
         蒸散发模型预测
       </SectionTitle>
       <p className="mb-2 text-[11px] leading-relaxed text-[var(--hc-muted)]">
-        60 天 LSTM 读取六项 ERA5 逐日气象，直接预测目标日的蒸散发（ETMonitor 口径）。灌溉需水量另行计算。
+        60 天 LSTM 逐日预测蒸散发，并结合对应日期的历史有效降雨估算补水。后 7 天和后 30 天从所选日期的次日开始累计。
       </p>
       <form
         className="flex flex-wrap items-center gap-2"
@@ -58,14 +95,19 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
       </form>
       {error && <p role="alert" className="mt-2 text-[11px] text-[var(--hc-danger)]">{error}</p>}
       {result && (
-        <div role="status" className="mt-3 rounded-lg border border-[var(--hc-line)] px-2.5 py-2">
-          <p className="text-[11px] text-[var(--hc-muted)]">{result.date} · 预测日蒸散发</p>
-          <p className="hc-num text-xl text-[var(--hc-accent)]">
-            {result.et_mm_day.toFixed(2)} <span className="text-xs">mm/天</span>
-          </p>
+        <div role="status" className="mt-3 space-y-2">
+          {PERIODS.map(({ key, label }) => (
+            <PeriodResult key={key} label={label} period={result.periods[key]} />
+          ))}
           <p className="text-[10px] text-[var(--hc-faint)]">
-            气象历史 {result.history_start} 至 {result.history_end} · {result.cells} 个网格
+            所选日气象历史 {result.history_start} 至 {result.history_end} · {result.cells} 个网格 · η {fmtNumber(result.efficiency, 2)}
           </p>
+          <details className="text-[10px] leading-relaxed text-[var(--hc-muted)]">
+            <summary className="cursor-pointer">补水估算依据</summary>
+            <p className="mt-1">
+              按日扣除有效降雨，水田计入渗漏，再按面积和灌溉效率换算。雨量只抵扣当天，结果用于历史补水参考。
+            </p>
+          </details>
         </div>
       )}
     </section>

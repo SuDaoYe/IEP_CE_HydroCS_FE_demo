@@ -156,6 +156,11 @@ def stage_kc(crop: str | None, stage_key: str | None) -> tuple[float, str, str]:
     return stages[0][2], spec["label"], stages[0][1]
 
 
+def crop_percolation(crop: str | None) -> float:
+    spec = CROPS.get(crop or "", CROPS["other"])
+    return float(spec.get("percolation_mm_day", 0.0)) if spec.get("paddy") else 0.0
+
+
 def _bucket(rows: list[dict], label: str) -> dict:
     """Sum one group of daily rows into a period total.
 
@@ -273,7 +278,7 @@ def compute_plan(
 
     kc, crop_label, stage_label = stage_kc(crop, stage_key)
     spec = CROPS.get(crop or "", CROPS["other"])
-    percolation = float(spec.get("percolation_mm_day", 0.0)) if spec.get("paddy") else 0.0
+    percolation = crop_percolation(crop)
 
     have_era5 = era5.load() is not None
     method = "era5-pm" if have_era5 else "etmonitor-inverse"

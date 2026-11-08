@@ -148,8 +148,13 @@ def field_et_forecast(field_id: str, date: dt.date, user: deps.CurrentUser) -> d
         _raise(exc)
         raise  # pragma: no cover
     rings = geo.rings_from_geojson(json.loads(row["geom_json"]))
+    if not rings:
+        raise HTTPException(422, "田块几何无效")
     try:
-        return et_forecast.predict(rings, date)
+        resolved = parameter_service.resolve_for_ring(rings[0])
+        return et_forecast.predict(
+            rings, date, params=resolved.values, percolation_mm_day=irrigation.crop_percolation(row["crop"]),
+        )
     except et_forecast.ForecastUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
