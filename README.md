@@ -335,7 +335,9 @@ cd web;    node scripts/verify-offline.mjs
 
 进入工作台，选中一个已保存的田块，在详情的「蒸散发模型预测」卡片里选择 2004 年的起报日期并点「查看预测」。接口 `GET /api/v1/fields/{id}/et-forecast?date=2004-07-15` 返回所选当天、次日起 7 天和次日起 30 天的蒸散发和补水量。三种模型都在各覆盖网格上独立预测，再按田块重叠面积加权。
 
-日尺度 LSTM 使用起报日前 60 天的逐日 ERA5 序列，补水换算使用当天存档降雨。周尺度使用起报日前 8 个完整 7 天区间，月尺度使用前 2 个完整 30 天区间。每段对五项气象求均值、对降水求和，两组输入均截至起报日前一天。两个独立模型分别一次输出后 7 天和后 30 天的蒸散发及有效降雨序列。逐日扣除预测有效降雨，水田加计渗漏后累计补水，毛供水再除以灌溉效率。上方的 FAO-56 需水卡片采用独立的参考蒸散口径。
+日尺度 LSTM 使用起报日前 60 天的逐日 ERA5 序列，补水换算使用当天存档降雨。周尺度使用起报日前 8 个完整 7 天区间，月尺度使用前 2 个完整 30 天区间。每段对五项气象求均值、对降水求和，两组输入均截至起报日前一天。后 30 天合计采用周尺度的第 1–7 天结果，加上月尺度的第 8–30 天估算。
+
+补水预测使用历史逐日正缺口作为监督目标。模型学习气象、区域降雨系数、水田渗漏与累计补水深度的关系。设置固定有效雨量时，按预估日蒸散和固定雨量逐日换算。毛供水等于净补水除以灌溉效率。上方的 FAO-56 需水卡片采用独立的参考蒸散口径。
 
 LSTM 使用 2001–2003 年的训练样本，在 2004 年的 310,368 个日期–网格样本上取得日 RMSE 0.7872 mm/天。随仓库附带的气象历史支持 2004 年回放。此前与随机森林的对比保存在 [评估记录](server/artifacts/et_forecast_benchmark.json)。
 
@@ -350,9 +352,10 @@ python scripts/build_et_forecast.py --daily-cache "<彭曼项目>/outputs_daily_
 
 ```powershell
 python scripts/train_et_period_forecasts.py --daily-cache "<彭曼项目>/outputs_daily_et/cache/daily_data.npz" --dataset "<数据输出目录>/era5_etmonitor_horizons.npz"
+python scripts/train_et_deficit_heads.py --dataset "<数据输出目录>/era5_etmonitor_horizons.npz"
 ```
 
-数据包中的 `week_weather` 和 `month_weather` 按区间首日与网格索引，`targets` 保存逐日 ETMonitor 蒸散发与 ERA5 有效降雨。各尺度的 `train`、`validation`、`test` 索引记录起报日和网格，预测标签为起报次日到第 7 或 30 天。用 2001–2002 年训练，2003 年选轮数，2004 年独立评估。各样本的目标期均落在对应切分内。指标见 [周月模型评估](server/artifacts/et_forecast_period_metrics.json)。
+数据包中的 `week_weather` 和 `month_weather` 按区间首日与网格索引，`targets` 保存逐日 ETMonitor 蒸散发与 ERA5 有效降雨。各尺度的 `train`、`validation`、`test` 索引记录起报日和网格。用 2001–2002 年训练，2003 年选轮数，2004 年独立评估。各样本的目标期均落在对应切分内。见 [蒸散发模型评估](server/artifacts/et_forecast_period_metrics.json) 和 [直接补水预测对比](server/artifacts/et_forecast_deficit_metrics.json)。
 
 ## 11. 已知限制与下一步
 

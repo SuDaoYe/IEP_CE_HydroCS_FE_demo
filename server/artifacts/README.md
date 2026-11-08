@@ -24,6 +24,8 @@ python -m uvicorn app.main:app --port 8000
 | `et_forecast_benchmark.json` | < 1 KB | 同一批 2004 年样本上的 RF、60 天 LSTM 历史对比指标 | 直接预测对比实验 |
 | `et_forecast_week.pt`、`et_forecast_month.pt` | 各约 50 KB | 使用起报日前周、月尺度气象，直接预测次日起 7 或 30 天的蒸散发和有效降雨 | `scripts/train_et_period_forecasts.py` |
 | `et_forecast_period_metrics.json` | 约 2 KB | 周、月模型的 2004 年留出期评估 | 同上 |
+| `et_forecast_week_deficit.pt`、`et_forecast_month_deficit.pt` | 各约 12 KB | 直接估算第 1–7 天和第 8–30 天的累计净补水深度 | `scripts/train_et_deficit_heads.py` |
+| `et_forecast_deficit_metrics.json` | 约 1 KB | 默认旱田参数下直接补水与先估算降雨再换算的留出期对比 | 同上 |
 
 ## 数据来源
 

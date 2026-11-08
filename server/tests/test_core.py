@@ -242,6 +242,20 @@ def test_field_et_forecast_uses_historical_window(client, monkeypatch):
             period["net_volume_m3"] / forecast["efficiency"], abs=0.02,
         )
     assert week["et_mm"] > 0 and month["et_mm"] > 0
+    assert month["et_mm"] >= week["et_mm"]
+    assert month["net_volume_m3"] >= week["net_volume_m3"]
+    assert month["gross_volume_m3"] >= week["gross_volume_m3"]
+
+    rings = geo.rings_from_geojson(created.json()["geometry"])
+    area_m2 = sum(geo.geodesic_area_m2(ring) for ring in rings)
+    dry = et_forecast.predict(
+        rings, dt.date(2004, 7, 15), params={"effective_rain_ratio": 0.0}, percolation_mm_day=3.0,
+    )
+    for key in ("week", "month"):
+        period = dry["periods"][key]
+        assert period["net_volume_m3"] == pytest.approx(
+            (period["et_mm"] + 3 * period["days"]) * area_m2 / 1000, abs=0.1,
+        )
 
     assets = et_forecast.load()
     masked_weather = assets.weather.copy()

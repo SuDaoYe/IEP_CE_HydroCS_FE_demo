@@ -129,21 +129,16 @@ def parcel_weights(rings: list[geo.Ring], assets: ForecastAssets) -> dict[tuple[
 
 
 def _period_totals(
-    start: date, et: np.ndarray, effective_rain: np.ndarray | float | None,
-    area_m2: float, efficiency: float, percolation_mm_day: float,
+    start: date, days: int, et_mm: float, net_mm: float | None, area_m2: float, efficiency: float,
 ) -> dict[str, Any]:
-    days = len(et)
-    net_m3 = None
-    if effective_rain is not None:
-        deficit = np.maximum(et + percolation_mm_day - effective_rain, 0.0)
-        net_m3 = float(deficit.sum()) * area_m2 / 1000
+    net_m3 = net_mm * area_m2 / 1000 if net_mm is not None else None
     return {
         "start": start.isoformat(),
         "end": (start + timedelta(days=days - 1)).isoformat(),
         "days": days,
         "et_days": days,
         "irrigation_days": days if net_m3 is not None else 0,
-        "et_mm": round(float(et.sum()), 3),
+        "et_mm": round(et_mm, 3),
         "net_volume_m3": round(net_m3, 2) if net_m3 is not None else None,
         "gross_volume_m3": round(net_m3 / efficiency, 2) if net_m3 is not None else None,
     }
@@ -184,23 +179,28 @@ def predict(
         rain = assets.weather[rain_index, rows, cols, PRECIPITATION]
         if np.isfinite(rain).all():
             rain_today = float(np.average(era5.effective_rainfall(rain), weights=area_weights)) * rain_ratio
+    net_today = max(0.0, daily_et + percolation_mm_day - rain_today) if rain_today is not None else None
     periods = {
         "day": {
-            **_period_totals(
-                target, np.array([daily_et]), rain_today, area_m2, efficiency, percolation_mm_day,
-            ),
+            **_period_totals(target, 1, daily_et, net_today, area_m2, efficiency),
             "method": "daily-replay",
             "history_start": first.isoformat(),
             "history_end": last.isoformat(),
         },
     }
+    interval_totals = {}
     for scale, model in assets.period_models.items():
-        profiles = model.predict(history[:, -model.history_days :])
-        et, rain = np.average(profiles, axis=0, weights=area_weights).T
-        effective_rain = rain_override if rain_override > 0 else rain * rain_ratio
+        totals = model.predict_totals(
+            history[:, -model.history_days :], rain_ratio, percolation_mm_day, rain_override,
+        )
+        interval_totals[scale] = np.average(totals, axis=0, weights=area_weights)
+    # Both cards use the same first week. The monthly model adds only days 8–30.
+    interval_totals["month"] += interval_totals["week"]
+    for scale, model in assets.period_models.items():
+        et_mm, net_mm = map(float, interval_totals[scale])
         periods[scale] = {
             **_period_totals(
-                target + timedelta(days=1), et, effective_rain, area_m2, efficiency, percolation_mm_day,
+                target + timedelta(days=1), model.horizon, et_mm, net_mm, area_m2, efficiency,
             ),
             "method": "period-lstm",
             "history_start": (target - timedelta(days=model.history_days)).isoformat(),

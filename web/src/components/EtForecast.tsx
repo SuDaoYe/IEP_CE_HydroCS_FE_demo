@@ -32,7 +32,7 @@ function PeriodResult({ label, period }: { label: string; period: EtForecastPeri
         </div>
       </dl>
       <p className="mt-1 text-[10px] text-[var(--hc-faint)]">
-        {period.method === 'period-lstm' ? (period.days === 7 ? '周尺度 LSTM' : '月尺度 LSTM') : '日尺度 LSTM'}
+        {period.method === 'period-lstm' ? (period.days === 7 ? '周尺度 LSTM' : '后 7 天 + 月尺度 LSTM 第 8–30 天') : '日尺度 LSTM'}
         {' · 气象输入 '}{fmtDate(period.history_start)} 至 {fmtDate(period.history_end)}
       </p>
       {!full && (
@@ -69,7 +69,7 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
         蒸散发模型预测
       </SectionTitle>
       <p className="mb-2 text-[11px] leading-relaxed text-[var(--hc-muted)]">
-        所选当天用 60 天 LSTM。后 7 天和后 30 天用独立的周、月尺度 LSTM，只读所选日期之前的气象。
+        所选当天用 60 天 LSTM。周、月尺度只读所选日期之前的气象，直接估算累计补水。
       </p>
       <form
         className="flex flex-wrap items-center gap-2"
@@ -109,7 +109,8 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
           <details className="text-[10px] leading-relaxed text-[var(--hc-muted)]">
             <summary className="cursor-pointer">补水估算依据</summary>
             <p className="mt-1">
-              当天补水用当天历史降雨。后 7 天和后 30 天用模型预测的有效降雨，逐日估算缺口并累计。水田计入渗漏。
+              当天补水用当天历史降雨。周、月模型以历史逐日缺口的累计值为训练目标，预测时直接估算累计净补水。
+              后 30 天合计采用后 7 天结果和第 8–30 天的月尺度估算。水田计入渗漏。
             </p>
           </details>
         </div>

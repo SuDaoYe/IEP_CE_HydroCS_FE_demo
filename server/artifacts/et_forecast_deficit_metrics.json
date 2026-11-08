@@ -1,0 +1,49 @@
+{
+  "schema": "era5_expected_deficit_v1",
+  "splits": {
+    "train": [
+      "2001-01-01",
+      "2002-12-31"
+    ],
+    "validation": [
+      "2003-01-01",
+      "2003-12-31"
+    ],
+    "test": [
+      "2004-01-01",
+      "2004-12-31"
+    ]
+  },
+  "test_rain_ratio": 1.0,
+  "test_percolation_mm_day": 0.0,
+  "periods": {
+    "week": {
+      "test_n": 303584,
+      "mean_rain_then_deficit": {
+        "rmse_mm": 8.676016445388635,
+        "mae_mm": 6.417702512106386,
+        "mean_bias_mm": -6.260695581257763
+      },
+      "direct_deficit": {
+        "rmse_mm": 4.694243956623114,
+        "mae_mm": 3.2777990266263757,
+        "mean_bias_mm": -0.5265802701041704
+      },
+      "best_epoch": 9
+    },
+    "month": {
+      "test_n": 284080,
+      "mean_rain_then_deficit": {
+        "rmse_mm": 34.29629861341195,
+        "mae_mm": 27.167361201856927,
+        "mean_bias_mm": -26.346653140223918
+      },
+      "direct_deficit": {
+        "rmse_mm": 14.28522700000009,
+        "mae_mm": 10.729057081713455,
+        "mean_bias_mm": -1.319878397951224
+      },
+      "best_epoch": 3
+    }
+  }
+}
