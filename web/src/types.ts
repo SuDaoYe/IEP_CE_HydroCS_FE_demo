@@ -82,6 +82,9 @@ export interface EtForecastPeriod {
   et_mm: number | null
   net_volume_m3: number | null
   gross_volume_m3: number | null
+  method: 'daily-replay' | 'period-lstm'
+  history_start: string
+  history_end: string
 }
 
 export interface EtForecastResult {

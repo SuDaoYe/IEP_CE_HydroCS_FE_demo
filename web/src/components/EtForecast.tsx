@@ -31,6 +31,10 @@ function PeriodResult({ label, period }: { label: string; period: EtForecastPeri
           <dd className="hc-num text-[16px] text-[var(--hc-accent)]">{fmtM3(period.gross_volume_m3)}</dd>
         </div>
       </dl>
+      <p className="mt-1 text-[10px] text-[var(--hc-faint)]">
+        {period.method === 'period-lstm' ? (period.days === 7 ? '周尺度 LSTM' : '月尺度 LSTM') : '日尺度 LSTM'}
+        {' · 气象输入 '}{fmtDate(period.history_start)} 至 {fmtDate(period.history_end)}
+      </p>
       {!full && (
         <p className="mt-1 text-[10px] text-[var(--hc-amber)]">
           仅累计有数据的日期 · 蒸散 {period.et_days}/{period.days} 天 · 补水 {period.irrigation_days}/{period.days} 天
@@ -61,11 +65,11 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
 
   return (
     <section className="rounded-xl border border-[var(--hc-line)] bg-[var(--hc-surface-2)] p-3">
-      <SectionTitle right={<span className="hc-chip text-[var(--hc-accent)]">历史演示</span>}>
+      <SectionTitle right={<span className="hc-chip text-[var(--hc-accent)]">2004 年演示</span>}>
         蒸散发模型预测
       </SectionTitle>
       <p className="mb-2 text-[11px] leading-relaxed text-[var(--hc-muted)]">
-        60 天 LSTM 逐日预测蒸散发，并结合对应日期的历史有效降雨估算补水。后 7 天和后 30 天从所选日期的次日开始累计。
+        所选当天用 60 天 LSTM。后 7 天和后 30 天用独立的周、月尺度 LSTM，只读所选日期之前的气象。
       </p>
       <form
         className="flex flex-wrap items-center gap-2"
@@ -100,12 +104,12 @@ export default function EtForecast({ fieldId }: { fieldId: string }) {
             <PeriodResult key={key} label={label} period={result.periods[key]} />
           ))}
           <p className="text-[10px] text-[var(--hc-faint)]">
-            所选日气象历史 {result.history_start} 至 {result.history_end} · {result.cells} 个网格 · η {fmtNumber(result.efficiency, 2)}
+            输入截至 {result.history_end} · {result.cells} 个网格 · η {fmtNumber(result.efficiency, 2)}
           </p>
           <details className="text-[10px] leading-relaxed text-[var(--hc-muted)]">
             <summary className="cursor-pointer">补水估算依据</summary>
             <p className="mt-1">
-              按日扣除有效降雨，水田计入渗漏，再按面积和灌溉效率换算。雨量只抵扣当天，结果用于历史补水参考。
+              当天补水用当天历史降雨。后 7 天和后 30 天用模型预测的有效降雨，逐日估算缺口并累计。水田计入渗漏。
             </p>
           </details>
         </div>

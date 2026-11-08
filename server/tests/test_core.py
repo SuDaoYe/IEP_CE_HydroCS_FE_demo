@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import db  # noqa: E402
-from app.services import era5, geo, gridmath, irrigation  # noqa: E402
+from app.services import era5, et_forecast, geo, gridmath, irrigation  # noqa: E402
 
 
 # --- geometry -------------------------------------------------------------
@@ -203,7 +204,7 @@ def test_other_farmers_field_is_hidden(client):
     assert response.status_code == 404
 
 
-def test_field_et_forecast_uses_historical_window(client):
+def test_field_et_forecast_uses_historical_window(client, monkeypatch):
     headers = auth_headers(client)
     created = client.post("/api/v1/fields", headers=headers, json={
         "name": "跨格预测测试田",
@@ -232,23 +233,33 @@ def test_field_et_forecast_uses_historical_window(client):
     )
     assert (week["start"], week["end"]) == ("2004-07-16", "2004-07-22")
     assert (month["start"], month["end"]) == ("2004-07-16", "2004-08-14")
+    assert (week["history_start"], month["history_start"]) == ("2004-05-20", "2004-05-16")
+    assert week["history_end"] == month["history_end"] == "2004-07-14"
+    assert week["method"] == month["method"] == "period-lstm"
     for period, days in ((day, 1), (week, 7), (month, 30)):
         assert (period["days"], period["et_days"], period["irrigation_days"]) == (days, days, days)
         assert period["gross_volume_m3"] == pytest.approx(
             period["net_volume_m3"] / forecast["efficiency"], abs=0.02,
         )
-    assert 0 < week["et_mm"] <= month["et_mm"]
-    assert 0 <= week["net_volume_m3"] <= month["net_volume_m3"]
+    assert week["et_mm"] > 0 and month["et_mm"] > 0
 
-    year_end = client.get(endpoint, headers=headers, params={"date": "2004-12-27"})
-    assert year_end.status_code == 200, year_end.text
-    partial = year_end.json()["periods"]["week"]
-    assert partial["end"] == "2005-01-03"
-    assert (partial["et_days"], partial["irrigation_days"]) == (4, 3)
+    assets = et_forecast.load()
+    masked_weather = assets.weather.copy()
+    masked_weather[assets.date_index[dt.date(2004, 7, 15)] :] = np.nan
+    with monkeypatch.context() as patch:
+        patch.setattr(et_forecast, "load", lambda: replace(assets, weather=masked_weather))
+        masked = client.get(endpoint, headers=headers, params=query)
+    assert masked.status_code == 200, masked.text
+    assert masked.json()["periods"]["day"]["net_volume_m3"] is None
+    assert masked.json()["periods"]["week"] == week
+    assert masked.json()["periods"]["month"] == month
+
     last_day = client.get(endpoint, headers=headers, params={"date": "2004-12-31"}).json()
     assert last_day["periods"]["day"]["et_days"] == 1
     assert last_day["periods"]["day"]["net_volume_m3"] is None
-    assert last_day["periods"]["month"]["et_mm"] is None
+    assert last_day["periods"]["week"]["end"] == "2005-01-07"
+    assert last_day["periods"]["month"]["end"] == "2005-01-30"
+    assert last_day["periods"]["month"]["irrigation_days"] == 30
 
     assert client.get(endpoint, headers=headers, params={"date": "2026-07-15"}).status_code == 422
     other = auth_headers(client, "farmer2", "123456")

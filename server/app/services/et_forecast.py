@@ -14,6 +14,7 @@ import numpy as np
 
 from ..config import ARTIFACTS_DIR
 from . import era5, geo, gridmath
+from .period_forecast import SCALES, PeriodForecaster
 
 WINDOW = 60
 START = date(2004, 1, 1)
@@ -23,7 +24,6 @@ WEATHER_FEATURES = (
     "pressure_kpa", "precipitation_mm_day",
 )
 PRECIPITATION = WEATHER_FEATURES.index("precipitation_mm_day")
-PERIODS = (("day", 0, 1), ("week", 1, 7), ("month", 1, 30))
 
 
 class ForecastUnavailable(Exception):
@@ -79,6 +79,7 @@ class LstmForecaster:
 @dataclass(frozen=True)
 class ForecastAssets:
     model: LstmForecaster
+    period_models: dict[str, PeriodForecaster]
     weather: np.ndarray
     date_index: dict[date, int]
     lat: np.ndarray
@@ -100,7 +101,11 @@ def load() -> ForecastAssets:
         ):
             raise ValueError("unexpected weather grid shape")
         model = LstmForecaster(ARTIFACTS_DIR / "et_forecast_lstm.pt")
-        return ForecastAssets(model, weather, date_index, lat, lon, trained)
+        period_models = {
+            scale: PeriodForecaster(ARTIFACTS_DIR / f"et_forecast_{scale}.pt", scale, WEATHER_FEATURES)
+            for scale in SCALES
+        }
+        return ForecastAssets(model, period_models, weather, date_index, lat, lon, trained)
     except (OSError, EOFError, ImportError, ValueError, KeyError, RuntimeError, UnpicklingError) as exc:
         raise ForecastUnavailable("蒸散发模型或历史气象资产无法加载") from exc
 
@@ -124,20 +129,21 @@ def parcel_weights(rings: list[geo.Ring], assets: ForecastAssets) -> dict[tuple[
 
 
 def _period_totals(
-    start: date, days: int, et_by_date: dict[date, float], net_by_date: dict[date, float],
-    area_m2: float, efficiency: float,
+    start: date, et: np.ndarray, effective_rain: np.ndarray | float | None,
+    area_m2: float, efficiency: float, percolation_mm_day: float,
 ) -> dict[str, Any]:
-    dates = [start + timedelta(days=i) for i in range(days)]
-    et = [et_by_date[day] for day in dates if day in et_by_date]
-    net_depths = [net_by_date[day] for day in dates if day in net_by_date]
-    net_m3 = sum(net_depths) * area_m2 / 1000 if net_depths else None
+    days = len(et)
+    net_m3 = None
+    if effective_rain is not None:
+        deficit = np.maximum(et + percolation_mm_day - effective_rain, 0.0)
+        net_m3 = float(deficit.sum()) * area_m2 / 1000
     return {
         "start": start.isoformat(),
-        "end": dates[-1].isoformat(),
+        "end": (start + timedelta(days=days - 1)).isoformat(),
         "days": days,
-        "et_days": len(et),
-        "irrigation_days": len(net_depths),
-        "et_mm": round(sum(et), 3) if et else None,
+        "et_days": days,
+        "irrigation_days": days if net_m3 is not None else 0,
+        "et_mm": round(float(et.sum()), 3),
         "net_volume_m3": round(net_m3, 2) if net_m3 is not None else None,
         "gross_volume_m3": round(net_m3 / efficiency, 2) if net_m3 is not None else None,
     }
@@ -160,58 +166,54 @@ def predict(
     area_weights = list(weights.values())
     area_m2 = sum(area_weights)
 
-    forecast_dates, windows = [], []
-    horizon = max(offset + days for _, offset, days in PERIODS)
-    for offset in range(min(horizon, (END - target).days + 1)):
-        day = target + timedelta(days=offset)
-        history_dates = [first + timedelta(days=offset + i) for i in range(WINDOW)]
-        indices = [assets.date_index[d] for d in history_dates if d in assets.date_index]
-        if len(indices) != WINDOW:
-            continue
-        history = assets.weather[np.asarray(indices)[:, None], rows, cols].transpose(1, 0, 2)
-        if np.isfinite(history).all():
-            forecast_dates.append(day)
-            windows.append(history)
-    if not forecast_dates or forecast_dates[0] != target:
+    indices = [assets.date_index.get(first + timedelta(days=i)) for i in range(WINDOW)]
+    if None in indices:
         raise ValueError("田块网格缺少完整的 60 天历史气象")
-
-    histories = np.concatenate(windows)
-    predictions = np.concatenate([
-        assets.model.predict(histories[i : i + 512]) for i in range(0, len(histories), 512)
-    ]).reshape(len(forecast_dates), len(weights))
-    parcel_et = np.average(predictions, axis=1, weights=area_weights)
-    et_by_date = dict(zip(forecast_dates, map(float, parcel_et)))
+    history = assets.weather[np.asarray(indices)[:, None], rows, cols].transpose(1, 0, 2)
+    if not np.isfinite(history).all():
+        raise ValueError("田块网格缺少完整的 60 天历史气象")
 
     params = params or {}
     efficiency = params.get("efficiency", 0.85) or 0.85
     rain_ratio = params.get("effective_rain_ratio", 1.0)
     rain_override = params.get("effective_rain_mm_day", 0.0)
-    net_by_date = {}
-    for day, et_mm in et_by_date.items():
-        if rain_override > 0:
-            pe_mm = rain_override
-        else:
-            index = assets.date_index.get(day)
-            if index is None:
-                continue
-            rain = assets.weather[index, rows, cols, PRECIPITATION]
-            if not np.isfinite(rain).all():
-                continue
-            pe_mm = float(np.average(era5.effective_rainfall(rain), weights=area_weights)) * rain_ratio
-        net_by_date[day] = max(0.0, et_mm + percolation_mm_day - pe_mm)
+    daily_et = float(np.average(assets.model.predict(history), weights=area_weights))
+    rain_today = rain_override if rain_override > 0 else None
+    rain_index = assets.date_index.get(target)
+    if rain_today is None and rain_index is not None:
+        rain = assets.weather[rain_index, rows, cols, PRECIPITATION]
+        if np.isfinite(rain).all():
+            rain_today = float(np.average(era5.effective_rainfall(rain), weights=area_weights)) * rain_ratio
+    periods = {
+        "day": {
+            **_period_totals(
+                target, np.array([daily_et]), rain_today, area_m2, efficiency, percolation_mm_day,
+            ),
+            "method": "daily-replay",
+            "history_start": first.isoformat(),
+            "history_end": last.isoformat(),
+        },
+    }
+    for scale, model in assets.period_models.items():
+        profiles = model.predict(history[:, -model.history_days :])
+        et, rain = np.average(profiles, axis=0, weights=area_weights).T
+        effective_rain = rain_override if rain_override > 0 else rain * rain_ratio
+        periods[scale] = {
+            **_period_totals(
+                target + timedelta(days=1), et, effective_rain, area_m2, efficiency, percolation_mm_day,
+            ),
+            "method": "period-lstm",
+            "history_start": (target - timedelta(days=model.history_days)).isoformat(),
+            "history_end": last.isoformat(),
+        }
 
     return {
         "date": target.isoformat(),
         "model": "era5-lstm-direct-60d",
-        "et_mm_day": round(et_by_date[target], 3),
+        "et_mm_day": round(daily_et, 3),
         "history_start": first.isoformat(),
         "history_end": last.isoformat(),
         "cells": len(weights),
         "efficiency": efficiency,
-        "periods": {
-            key: _period_totals(
-                target + timedelta(days=offset), days, et_by_date, net_by_date, area_m2, efficiency,
-            )
-            for key, offset, days in PERIODS
-        },
+        "periods": periods,
     }

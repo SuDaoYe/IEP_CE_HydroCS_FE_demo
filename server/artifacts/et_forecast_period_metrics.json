@@ -1,0 +1,70 @@
+{
+  "schema": "era5_etmonitor_period_profiles_v1",
+  "splits": {
+    "train": [
+      "2001-01-01",
+      "2002-12-31"
+    ],
+    "validation": [
+      "2003-01-01",
+      "2003-12-31"
+    ],
+    "test": [
+      "2004-01-01",
+      "2004-12-31"
+    ]
+  },
+  "seed": 42,
+  "periods": {
+    "week": {
+      "history_days": 56,
+      "horizon_days": 7,
+      "best_epoch": 1,
+      "training_pool": 613104,
+      "training_used": 160000,
+      "validation_used": 32000,
+      "test_n": 303584,
+      "test_first_issue": "2004-01-01",
+      "test_last_issue": "2004-12-23",
+      "metrics_mm_per_period": {
+        "et": {
+          "rmse": 4.168509346410664,
+          "mae": 3.0128783377745885
+        },
+        "effective_rain": {
+          "rmse": 15.004877636719536,
+          "mae": 9.074969791423495
+        },
+        "net_replenishment": {
+          "rmse": 8.676016445210285,
+          "mae": 6.417702512036531
+        }
+      }
+    },
+    "month": {
+      "history_days": 60,
+      "horizon_days": 30,
+      "best_epoch": 6,
+      "training_pool": 593600,
+      "training_used": 160000,
+      "validation_used": 32000,
+      "test_n": 284080,
+      "test_first_issue": "2004-01-01",
+      "test_last_issue": "2004-11-30",
+      "metrics_mm_per_period": {
+        "et": {
+          "rmse": 15.515625362613823,
+          "mae": 11.96206942820983
+        },
+        "effective_rain": {
+          "rmse": 38.10998877077165,
+          "mae": 24.452229268830013
+        },
+        "net_replenishment": {
+          "rmse": 34.29629864444029,
+          "mae": 27.167361216737003
+        }
+      }
+    }
+  }
+}
