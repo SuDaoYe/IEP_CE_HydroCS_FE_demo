@@ -5,6 +5,7 @@ import { editGeometry } from '../lib/actions'
 import { useData } from '../store/data'
 import { useIrrigation } from '../store/irrigation'
 import { useUI } from '../store/ui'
+import { useWork } from '../store/work'
 import { flyToField } from './mapBridge'
 import EtForecast from './EtForecast'
 import IrrigationChart from './IrrigationChart'
@@ -70,6 +71,7 @@ export default function DetailPanel() {
   const patchField = useData((state) => state.patchField)
   const removeField = useData((state) => state.removeField)
   const detailOpen = useUI((state) => state.detailOpen)
+  const editingShape = useWork((state) => state.mode === 'edit')
   const setDetailOpen = useUI((state) => state.setDetailOpen)
   const notify = useUI((state) => state.notify)
 
@@ -453,7 +455,7 @@ export default function DetailPanel() {
         {content}
       </aside>
 
-      {detailOpen && (
+      {detailOpen && !editingShape && (
         <div className="absolute inset-0 z-40 lg:hidden">
           <div
             className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"

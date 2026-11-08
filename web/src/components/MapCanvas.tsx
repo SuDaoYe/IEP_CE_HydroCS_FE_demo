@@ -32,10 +32,21 @@ function singleCollection(geometry: unknown) {
   }
 }
 
+interface VertexHandle {
+  marker: maplibregl.Marker
+  dragging: boolean
+  frame: number | null
+}
+
+function removeVertexHandle({ marker, frame }: VertexHandle) {
+  if (frame !== null) cancelAnimationFrame(frame)
+  marker.remove()
+}
+
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
-  const markersRef = useRef<maplibregl.Marker[]>([])
+  const markersRef = useRef<VertexHandle[]>([])
   const readyRef = useRef(false)
   const [tilesLoading, setTilesLoading] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM)
@@ -47,6 +58,7 @@ export default function MapCanvas() {
   const select = useData((state) => state.select)
 
   const mode = useWork((state) => state.mode)
+  const editingId = useWork((state) => state.editingId)
   const draft = useWork((state) => state.draft)
   const candidates = useWork((state) => state.candidates)
   const addVertex = useWork((state) => state.addVertex)
@@ -201,15 +213,28 @@ export default function MapCanvas() {
   }, [draft])
 
   // --- vertex handles --------------------------------------------------
+  useEffect(() => () => {
+    markersRef.current.splice(0).forEach(removeVertexHandle)
+  }, [mode, editingId])
+
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
-    markersRef.current.forEach((marker) => marker.remove())
-    markersRef.current = []
-    const editable = mode === 'draw' || mode === 'edit' || mode === 'review'
-    if (!editable) return
+    if (!map || mode === 'idle') return
 
+    // Keep the same marker mounted for the whole gesture. Removing it also
+    // removes MapLibre's active mouse and touch drag listeners.
+    const handles = markersRef.current
+    handles.splice(draft.length).forEach(removeVertexHandle)
     draft.forEach(([lon, lat], index) => {
+      const existing = handles[index]
+      if (existing) {
+        const position = existing.marker.getLngLat()
+        if (!existing.dragging && (position.lng !== lon || position.lat !== lat)) {
+          existing.marker.setLngLat([lon, lat])
+        }
+        return
+      }
+
       const el = document.createElement('div')
       el.style.width = '24px'
       el.style.height = '24px'
@@ -228,13 +253,27 @@ export default function MapCanvas() {
       const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'center' })
         .setLngLat([lon, lat])
         .addTo(map)
-      marker.on('drag', () => {
-        const position = marker.getLngLat()
-        moveVertex(index, position.lng, position.lat)
+      const handle: VertexHandle = { marker, dragging: false, frame: null }
+      const syncDraft = () => {
+        handle.frame = null
+        const { lng, lat } = marker.getLngLat()
+        const current = useWork.getState().draft[index]
+        if (current && (current[0] !== lng || current[1] !== lat)) moveVertex(index, lng, lat)
+      }
+      marker.on('dragstart', () => {
+        handle.dragging = true
       })
-      markersRef.current.push(marker)
+      marker.on('drag', () => {
+        handle.frame ??= requestAnimationFrame(syncDraft)
+      })
+      marker.on('dragend', () => {
+        if (handle.frame !== null) cancelAnimationFrame(handle.frame)
+        handle.dragging = false
+        syncDraft()
+      })
+      handles.push(handle)
     })
-  }, [draft, mode, moveVertex])
+  }, [draft, editingId, mode, moveVertex])
 
   // --- interactions ----------------------------------------------------
   useEffect(() => {
@@ -328,14 +367,21 @@ export default function MapCanvas() {
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    const onLoading = () => setTilesLoading(true)
+    const onLoading = ({ sourceId }: maplibregl.MapSourceDataEvent) => {
+      if (sourceId === 'imagery') setTilesLoading(true)
+    }
+    const onSourceData = ({ sourceId, isSourceLoaded }: maplibregl.MapSourceDataEvent) => {
+      if (sourceId === 'imagery' && isSourceLoaded) setTilesLoading(false)
+    }
     const onIdle = () => setTilesLoading(false)
     const onZoom = () => setZoomLevel(map.getZoom())
-    map.on('dataloading', onLoading)
+    map.on('sourcedataloading', onLoading)
+    map.on('sourcedata', onSourceData)
     map.on('idle', onIdle)
     map.on('zoomend', onZoom)
     return () => {
-      map.off('dataloading', onLoading)
+      map.off('sourcedataloading', onLoading)
+      map.off('sourcedata', onSourceData)
       map.off('idle', onIdle)
       map.off('zoomend', onZoom)
     }
