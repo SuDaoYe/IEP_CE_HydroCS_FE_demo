@@ -11,12 +11,14 @@
 | 能力 | 数据来源 | 本期状态 |
 |---|---|---|
 | 田块识别 | YOLO11s-seg（`4.102_best.pt`，单类 farmland） | 已跑通，实测 z18 影像 156 个地块、0.04–2.5 ha，边界贴合 |
-| 参考蒸散 ET0 | ERA5 逐小时 6 要素 → FAO-56 Penman–Monteith | 已接入，1827 天 × 33 × 29 |
-| 有效降雨 Pe | ERA5 日降水 × 利用系数（上限 35 mm/天） | 已接入，可被管理端固定值覆盖 |
-| 观测 ET（对照/降级） | ETMonitor 0.25° 日 ET 网格 2000–2004 | 已接入，仅在 ERA5 资产缺失时参与计算 |
-| ET 的 ML 预测（RF/XGB/LSTM…） | ERA5 六要素 → ET | **未接入**，训练权重不在包内；接口预留 |
+| **日 ET 预测（主路径）** | ERA5 6 要素 30 天滑窗 → HistGradientBoostingRegressor → ETMonitor 日蒸散 | **已接入并训练**，2003 验证 RMSE 0.483 / 2004 测试 RMSE 0.523 mm/day（R² 0.882） |
+| 参考蒸散 ET0（降级） | ERA5 逐小时 6 要素 → FAO-56 Penman–Monteith | 已接入，1827 天 × 33 × 29；模型资产缺失时启用 |
+| 有效降雨 Pe | ERA5 日降水 × 0.8（上限 35 mm/天） | 已接入 |
+| 观测 ET（对照/兜底） | ETMonitor 0.25° 日 ET 网格 2000–2004 | 已接入，ERA5 也缺失时才参与计算 |
 
-> 关键判断：需水量走 `Kc × ET0 − Pe` 的教科书口径；ETMonitor 网格降级为兜底。ERA5 只到 2004 年，未来日期的 ET0/Pe 用同日序 5 年气候态，并在响应里标记。
+> 关键判断：需水量走 `Kc / Kc_ref × ET_模型 − Pe`。模型的标签就是 ETMonitor 日蒸散，
+> 因此它替代了原先"ET0 物理公式 + 区域系数标定"这两步；ET0 保留下沉为降级路径。
+> ERA5 只到 2004 年，超出该区间的日期用模型的同日序 5 年气候态，并在响应里标记 `source: model-climatology`。
 
 ## 2. 架构
 
@@ -25,7 +27,7 @@
 ┌────────────────────────────────────┐        ┌────────────────────────────────────────┐
 │ MapLibre GL  卫星底图 + 田块 GeoJSON │        │ /api/imagery   瓦片代理·磁盘缓存·多源     │
 │ Terra-draw 式顶点编辑（触摸友好）     │        │ /api/segment   滑窗 YOLO11s-seg → 多边形 │
-│ IndexedDB    我的田块/历史/预测副本   │ HTTPS  │ /api/irrigation ET 网格 × Kc → 需水量    │
+│ IndexedDB    我的田块/历史/预测副本   │ HTTPS  │ /api/irrigation ET 模型 × Kc → 需水量    │
 │ 同步队列      离线编辑 → 增量合并      │<──────>│ /api/fields    田块权威存储（备份）        │
 │ Service Worker 应用外壳 + 瓦片缓存    │        │ /api/auth · /api/sync · /api/admin      │
 └────────────────────────────────────┘        │ SQLite(WAL)  →  可平滑迁 PostgreSQL/PostGIS│
@@ -90,22 +92,32 @@ bbox + zoom
 # ERA5 逐小时 -> 日尺度（累计量按前一小时归日，缺 24 小时记 NaN）
 T   = mean(t2m) - 273.15 ；VPD = es(T) - es(Td) ；u2 = u10*4.87/ln(67.8*10-5.42)
 Rn  = (ssr + str)/1e6           # 净辐射 MJ/m2/day
-ET0 = [0.408Δ(Rn-G) + γ·900/(T+273)·u2·VPD] / [Δ + γ(1+0.34u2)]   # G≈0
-Pe  = min(P * 降雨利用系数, 35)  # 日有效降雨
+ET0 = [0.408Δ(Rn-G) + γ·900/(T+273)·u2·VPD] / [Δ + γ(1+0.34u2)]   # G≈0（降级路径用）
+Pe  = min(P * 0.8, 35)          # 日有效降雨
+
+# 主路径：30 天 ERA5 滑窗 -> 当日 ET（模型）
+X        = [PRECIP, T2M, VPD, SSR, STR, U2M] × 最近 30 天        # 180 维
+ET_model = HGB(X)                                               # mm/day，标签 = ETMonitor 日蒸散
 
 # 田块 -> 网格：按与 0.25° 网格的面积重叠加权（不是单点取值）
-ET0_field = Σ(w_i · ET0_i) / Σ w_i ；Pe_field 同理
-ETc      = Kc(作物, 生育期) · ET0_field · kc_scale
-净需水   In = max(0, ETc + 渗漏 - Pe_field)   # mm/day，水田渗漏 3 mm/天
-毛需水   Ig = In / η                          # mm/day
-日水量   V  = Ig(m) * A(m2) / 1000            # m3/day
+ET_field  = Σ(w_i · ET_i) / Σ w_i ；Pe_field 同理
+ETc       = ET_field · Kc(作物, 生育期) / Kc_ref                # Kc_ref = 0.95
+净需水    In = max(0, ETc + 渗漏 - Pe_field)                     # mm/day，水田渗漏 3 mm/天
+毛需水    Ig = In / η                                           # mm/day，η = 0.85
+日水量    V_net   = In * A / 1000        # m3/day，补进根区
+日总水量  V_gross = Ig * A / 1000        # m3/day，水源实取
 ```
 
-- `Pe`（有效降雨）：ERA5 日降水 × `effective_rain_ratio`（默认 1.0）并封顶 35 mm/天；管理端可用 `effective_rain_mm_day` 强制固定值。
-- **系数作用域**：`Kc` 校准、降雨利用系数、灌溉水利用系数按 `global → province:XXX → city:XXX` 继承
-  （`services/params.py`），田块解算时按其所在市解析；响应里 `parameter_scope` 给出取值与来源。
-- 降级：`era5_daily.npz` 缺失时自动退回 ETMonitor 近似法（区域 Kc 反推 ET0、Pe 记 0），响应 `method` 字段区分。
-- 预测：取 2000–2004 年**同一天序**的 ET0/降水均值作为未来 7 天期望曲线，并给出 5 年最小/最大包络作为不确定性带；域外坐标退化为纬度-月序正弦经验模型并标记 `extrapolated=true`。
+- **模型**：`HistGradientBoostingRegressor`，180 特征，训练集 2001–2002（15 万样本）、验证集 2003（4 万）、测试集 2004（4 万）；
+  窗口 1/7/30 天三选一，验证 RMSE 0.544 → 0.511 → **0.483**，故取 30 天。产物 `artifacts/models/et_model.joblib`（0.78 MB）。
+- **为什么除以 Kc_ref**：模型输出的是参考作物在该气候下实际消耗的水，乘 `Kc/Kc_ref` 才能换算到具体作物，
+  与 `ETc = Kc·ET0` 同构，但把 ET0 那一步换成了数据驱动的映射。
+- `Pe`（有效降雨）：ERA5 日降水 × 0.8 并封顶 35 mm/天，固定式（不再可调）。
+- **系数不再是可调参数层**：`services/params.py`、`/admin/params`、管理端参数字页已整体删除；
+  现在只有 `Kc` 表（FAO-56）、`Kc_ref`、`η`、渗漏量四个常量，全部写死在 `services/irrigation.py` 并附出处。
+- 降级：`et_model.joblib` 缺失 → `era5-pm`（FAO-56 ET0）；`era5_daily.npz` 也缺失 → `etmonitor`（区域 Kc 反推、Pe 记 0）。
+  响应里 `method` ∈ {`model-hgb`, `era5-pm`, `etmonitor`, `mixed`}，逐日 `source` ∈ {`model`, `model-climatology`, `era5-pm`, `etmonitor`}。
+- 预测：超出 2000–2004 的日期取模型在**同一天序**上的 5 年均值（`model-climatology`）；域外坐标退化为纬度-月序正弦经验模型并标记 `extrapolated=true`。
 - 输出同时给 `m³/day`、`m³/week`、`亩均方量`，农户看得懂的量纲优先。
 
 ## 7. API
@@ -129,8 +141,7 @@ ETc      = Kc(作物, 生育期) · ET0_field · kc_scale
 | POST | `/sync` | 批量推送离线操作，返回权威副本 |
 | GET | `/admin/users` `PATCH` `/admin/users/{id}` | 用户管理 |
 | GET | `/admin/fields` | 全部田块 + 归属 |
-| GET | `/admin/stats` | 覆盖率、活跃用户、区域总需水 |
-| GET/PATCH | `/admin/params?scope=` | 区域化系数（global / province / city 三级继承） |
+| GET | `/admin/stats` | 覆盖率、活跃用户、区域总需水、`et_model` 指标 |
 | GET | `/geo/search` `/geo/locate` `/geo/regions` | 行政区模糊搜索 / 坐标反查 / 层级列表 |
 | GET | `/admin/regions/overview` `/admin/regions/summary` | 行政区需水汇总与用水户统计 |
 | GET/POST | `/admin/meteo/status` `/fs` `/upload` `/scan` `/rebuild` | 气象数据运维 |
@@ -175,8 +186,10 @@ fields(id, owner_id, name, crop, stage_key, plant_date, geom_json, bbox_minx/min
        created_at, updated_at, deleted_at, rev)
 irrigation_logs(id, field_id, computed_at, days, payload_json, request_json)
 sync_ops(op_id PK, user_id, kind, entity_id, payload_json, applied_at)   -- 幂等去重
-params(key PK, value_json, updated_at)
 ```
+
+> 原先的 `params(key, value_json)` 参数覆盖表已随"参数微调"功能一并移除；`db.py` 的迁移脚本会跳过它的创建，
+> 老库里的这张表不读取、也不影响查询。
 
 ## 9. 前端布局（三形态）
 
