@@ -82,7 +82,36 @@ bbox + zoom
   → GeoJSON FeatureCollection（含 area_m2 / area_mu / confidence）
 ```
 
-失败降级顺序：`yolo` → `heuristic`（LAB 色彩聚类 + 形态学 + 连通域，无需模型）→ `503` 并说明原因。响应里始终带 `backend` 字段，前端据此提示"当前为规则识别，建议手动修正"。
+失败降级顺序：`model` → `heuristic`（LAB 色彩聚类 + 形态学 + 连通域，无需模型）→ `503` 并说明原因。响应里始终带 `backend` 字段（形如 `yolo11s-seg · cuda`），前端据此提示"当前为规则识别，建议手动修正"。
+
+## 5.5 计算后端：有 CUDA 用 CUDA，没有就转译
+
+`services/compute.py` 探测能力，`services/seg_engine.py` 按结果造引擎，两者都不依赖具体硬件：
+
+```
+探测：torch 版本 / torch.version.cuda / cuda.is_available / GPU 型号显存
+      + onnxruntime.get_available_providers()
+选择：auto → cuda → onnx-cuda → onnx-dml → torch-cpu → onnx-cpu → heuristic
+```
+
+| 后端 | 权重 | 触发条件 | 说明 |
+|---|---|---|---|
+| `cuda` | `.pt` | CUDA 版 torch + 可用 GPU | 走 ultralytics 原生推理，`quantize="fp16"` |
+| `onnx-cuda` | `.onnx` | ORT 提供 `CUDAExecutionProvider` | 兼容 `onnxruntime-gpu` |
+| `onnx-dml` | `.onnx` | ORT 提供 `DmlExecutionProvider` | Windows + 任意 DX12 显卡（NVIDIA/AMD/Intel） |
+| `torch-cpu` | `.pt` | 兜底 | 实测比 ONNX-CPU 快 ~1.4× |
+| `onnx-cpu` | `.onnx` | 兜底备选 | 可用 `HYDROCS_SEG_ORT_THREADS` 调线程 |
+
+两个引擎对外是同一个接口 `predict(crop) -> (masks, scores, boxes)`：
+
+- `UltralyticsEngine`：直接 `YOLO(.pt)`，用 `devices=` / 精度参数切换 GPU/CPU。
+- `OnnxEngine`：自己开 ORT 会话（前处理 letterbox、后处理复用 ultralytics 的
+  `non_max_suppression` + `process_mask`），因此 CUDA / DirectML / CPU 三种 EP 走同一段代码。
+  两条路径的掩膜一致性实测 IoU 0.97–0.99（含非方形裁剪图，靠 `_unpad_masks` 裁掉居中填充）。
+
+**并发**：进程内用 `BoundedSemaphore` 把「推理 + 上色 + 矢量化 + 去重」串行化（默认 1），
+因为这几步是 GIL/GPU 争用型工作，多线程只会互相拖慢（实测 4 路并发 p50 反而涨到 5–8 倍）；
+横向扩展靠 `uvicorn --workers N`。实测数据与部署配方见 [performance.md](performance.md)。
 
 ## 6. 灌溉需水量
 
@@ -145,6 +174,7 @@ ETc       = ET_field · Kc(作物, 生育期) / Kc_ref                # Kc_ref =
 | GET | `/geo/search` `/geo/locate` `/geo/regions` | 行政区模糊搜索 / 坐标反查 / 层级列表 |
 | GET | `/admin/regions/overview` `/admin/regions/summary` | 行政区需水汇总与用水户统计 |
 | GET/POST | `/admin/meteo/status` `/fs` `/upload` `/scan` `/rebuild` | 气象数据运维 |
+| GET | `/segment/status` | 当前识别后端、设备、各后端可用性与原因、拼图缓存 |
 
 ## 7.5 行政区划与气象运维
 

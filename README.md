@@ -4,6 +4,7 @@
 
 - **前端**：移动优先 H5 / PWA（React 18 + TypeScript + Vite + Tailwind v4 + MapLibre GL）
 - **后端**：FastAPI（Python 3.12），跑 YOLO11s-seg 分割，并用**训练好的 ET 预测模型**（30 天 ERA5 窗口 → 日蒸散）解算需水量，SQLite 存田块与记录
+- **算力**：识别引擎自动挑选后端 —— 有 CUDA 就用 CUDA（比 CPU 快 **7.8×**），没有就把模型转译成 ONNX 交给 DirectML / CPU（详见 [docs/performance.md](docs/performance.md)）
 - **离线**：IndexedDB 缓存我的田块与历史，断网可查可编辑，联网按 op_id 幂等同步
 
 ```
@@ -82,6 +83,7 @@
 ```
 整合demo01/
 ├─ docs/architecture.md          架构、接口、算法规格（含验收标准）
+├─ docs/performance.md           算力后端与并发的实测数据、部署配方
 ├─ server/
 │  ├─ app/
 │  │  ├─ main.py                 FastAPI 入口（/healthz、/docs、可选托管 SPA）
@@ -90,15 +92,20 @@
 │  │  ├─ repository.py           田块持久化与序列化
 │  │  ├─ seed.py                 演示账号与 4 块示范田
 │  │  ├─ routers/                auth · fields · segment · irrigation · imagery · sync · admin
-│  │  └─ services/               geo（测地线/GCJ-02）· imagery · segmentation · et_grid · era5 · et_model · irrigation
+│  │  └─ services/               geo（测地线/GCJ-02）· imagery · compute（算力探测）
+│  │                             · seg_engine（CUDA/ONNX/DirectML 引擎）· segmentation
+│  │                             · et_grid · era5 · et_model · irrigation
 │  ├─ scripts/
 │  │  ├─ build_et_grid.py        rar → et_grid.npz（自动调用 Bandizip 抽取）
 │  │  ├─ build_era5_daily.py     逐小时 NC → 日尺度 + ET0 + Pe
 │  │  ├─ train_et_model.py       日尺度特征窗 → ET 模型（joblib），输出验证/测试指标
+│  │  ├─ export_onnx.py          .pt → .onnx（没有 CUDA 时的转译路径）
+│  │  ├─ bench_segment.py        各推理后端单张延迟对比
+│  │  ├─ bench_load.py           /segment 并发压测（吞吐、p50、分段耗时）
 │  │  ├─ build_admin_divisions.py 省/市边界 + 区县中心点 → 搜索索引
 │  │  ├─ smoke.py                端到端冒烟
 │  │  └─ debug_segment.py        识别可视化调试
-│  ├─ tests/test_core.py         35 个单元 + 接口测试
+│  ├─ tests/test_core.py         41 个单元 + 接口测试
 │  └─ artifacts/                 et_grid.npz、era5_daily.npz、models/et_model.joblib、weights/
 └─ web/
    ├─ src/components/            MapCanvas · ToolRail · FieldSheet · DetailPanel · EditBar · IrrigationChart
@@ -128,6 +135,21 @@ copy ..\..\农田识别分割\weights\4.102_best.pt artifacts\weights\4.102_best
 # ④ 启动
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+> **算力可选加速**（都不改代码，启动时自动探测，顺序 `cuda → onnx-cuda → onnx-dml → torch-cpu → onnx-cpu`）：
+>
+> ```powershell
+> # 有 NVIDIA 显卡：换 CUDA 版 torch，识别从 1.1 s 降到 145 ms
+> python -m pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.12.1+cu130 torchvision==0.27.1+cu130
+>
+> # 没有 CUDA（含 AMD/Intel 显卡）：把权重转译成 ONNX，走 DirectML
+> python scripts/export_onnx.py
+> python -m pip install onnxruntime-directml
+> ```
+>
+> 实测与并发建议见 [docs/performance.md](docs/performance.md)：
+> CUDA 145 ms / DirectML 453 ms / CPU 1130 ms（同一张 1024×1280 拼图、55 个地块），
+> 单进程 7.1 req/s，2 进程 9.7 req/s；**进程内不要开并发**，横向扩展靠 `--workers`。
 
 ```powershell
 # 前端（开发模式，Vite 代理 /api 到 8000）
@@ -315,7 +337,7 @@ ERA5 缓存并重载。测试覆盖了「追加 + 覆盖」的合并语义。
 
 | 项目 | 结果 |
 |---|---|
-| 后端单测 + 接口测试 | `35 passed`（几何精度、FAO-56 复算、Kc 逻辑、周/月滚存、行政区检索与落区、瓦片象限裁切、气象合并语义、CRUD、越权、幂等同步、乐观锁冲突） |
+| 后端单测 + 接口测试 | `41 passed`（几何精度、FAO-56 复算、Kc 逻辑、周/月滚存、行政区检索与落区、瓦片象限裁切、气象合并语义、CRUD、越权、幂等同步、乐观锁冲突、算力探测与后端回退） |
 | ET 模型训练 | 2001–2002 训练（15 万样本）· 2003 验证选窗 · 2004 测试；1/7/30 天窗对比后取 30 天 |
 | ET 模型精度 | 2003 RMSE 0.483 mm/day（R² 0.881、MAE 0.335）；2004 RMSE 0.523 mm/day（R² 0.882、MAE 0.360），观测均值 1.88 mm/day |
 | 模型优先链路 | `2004-07-15` → ET 4.326 mm（`source: model`）；`2026-10-30` → ET 0.854 mm（`source: model-climatology`）；`method` = `model-hgb` |
@@ -324,6 +346,10 @@ ERA5 缓存并重载。测试覆盖了「追加 + 覆盖」的合并语义。
 | ET 网格资产 | 1830 天 × 33 × 29，有效像元 1,551,840，ET 0.00–14.78 mm/day |
 | ERA5 日尺度资产 | 1827 天 × 33 × 29 × 8 变量（38.5 MB）；年均 ET0 2.40–2.70 mm/day、降水 1.86–3.02 mm/day |
 | 需水接口耗时 | 单田块 7 天 ≈ 140 ms（含模型逐日推理）；两田块汇总 < 300 ms |
+| 识别算力（同一张 1024×1280 拼图、55 个地块） | CUDA **145 ms** · DirectML **453 ms** · torch-CPU **1130 ms** · ONNX-CPU 1572 ms |
+| 识别并发（单进程，推理闸门=1） | 并发 1/2/4 → p50 141/188/328 ms，吞吐 7.1/5.9/4.3 req/s |
+| 识别横向扩展（多进程） | 1/2/3 进程 → 7.1/9.7/10.8 req/s（单卡 8.6 GB 约 3 进程饱和） |
+| 识别缓存 | 同参数重复识别 ≈ 2 ms；拼图内存 LRU 命中 0 ms |
 | 前端构建 | `tsc --noEmit` 通过；`vite build` 1.06 MB JS / 305 KB gzip |
 | 浏览器巡检 | Playwright + Edge：桌面/手机双视口 + 搜索/勾画/行政区/气象/净毛/模型状态 共 20 张截图，**控制台 0 错误** |
 | 行政区汇总 | 东营市 370500：6 块田 / 2 户 / 113.4 亩 / 7 天 933 m³ |
@@ -340,6 +366,9 @@ ERA5 缓存并重载。测试覆盖了「追加 + 覆盖」的合并语义。
 cd server; python -m pytest tests -q
 cd server; python scripts/smoke.py              # 登录→田块→需水→识别→管理端
 cd server; python scripts/train_et_model.py     # 重训 ET 模型并打印验证/测试指标
+cd server; python scripts/export_onnx.py        # 导出 ONNX（DirectML/CUDA EP 用）
+cd server; python scripts/bench_segment.py      # 各推理后端延迟对比
+cd server; python scripts/bench_load.py --concurrency 1,2,4   # 并发压测（需先启动服务）
 cd server; python scripts/build_seed_fields.py  # 用识别结果重建演示田块
 cd server; python scripts/debug_segment.py      # 生成 seg_debug.png 目视检查
 cd web;    npm run build
