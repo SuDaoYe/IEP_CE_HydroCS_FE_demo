@@ -10,7 +10,6 @@ from fastapi import APIRouter, Query
 
 from .. import deps, repository
 from ..services import geo, irrigation
-from ..services import params as parameter_service
 
 router = APIRouter(prefix="/irrigation", tags=["irrigation"])
 
@@ -29,17 +28,10 @@ def summary(
     fields = repository.list_fields(owner_id=user["id"])
     start_date = dt.date.fromisoformat(start) if start else dt.date.today()
     plans: list[dict[str, Any]] = []
-    scopes: dict[str, Any] = {}
     for field in fields:
         rings = geo.rings_from_geojson(field["geometry"])
         if not rings:
             continue
-        resolved = parameter_service.resolve_for_ring(rings[0])
-        scopes[resolved.scope] = {
-            "values": resolved.values,
-            "sources": resolved.sources,
-            "region": resolved.region,
-        }
         plan = irrigation.compute_plan(
             ring=rings[0],
             area_m2=float(field["area_m2"]),
@@ -47,7 +39,6 @@ def summary(
             stage_key=field["stage_key"],
             days=days,
             start=start_date,
-            params=parameter_service.params_for_plan(resolved),
         )
         plan["field"] = {
             "id": field["id"],
@@ -57,15 +48,12 @@ def summary(
             "crop_label": field["crop_label"],
             "stage_label": field["stage_label"],
         }
-        plan["parameter_scope"] = resolved.scope
         plans.append(plan)
 
     totals = irrigation.summarize(plans)
     return {
         "start": start_date.isoformat(),
         "days": days,
-        "params": next(iter(scopes.values()), {}).get("values", parameter_service.DEFAULTS),
-        "parameter_scopes": scopes,
         "totals": totals,
         "fields": [
             {
@@ -79,16 +67,6 @@ def summary(
             for plan in plans
         ],
         "assumptions": plans[0]["assumptions"] if plans else [],
-    }
-
-
-@router.get("/params")
-def params() -> dict[str, Any]:
-    """Current defaults plus the regional parameter catalogue."""
-    return {
-        "current": parameter_service.DEFAULTS,
-        "catalog": parameter_service.catalog(),
-        "scopes": parameter_service.list_scopes(),
     }
 
 

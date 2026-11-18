@@ -30,9 +30,6 @@ async def lifespan(_: FastAPI):
         from .seed import ensure_seed
 
         ensure_seed()
-    from .services import params as parameter_service
-
-    parameter_service.migrate_legacy()
     log.info("segmentation backend: %s", segmentation.backend_status()["backend"])
     grid = et_grid.status()
     log.info("ET grid: %s", "ready" if grid.get("available") else grid.get("error"))

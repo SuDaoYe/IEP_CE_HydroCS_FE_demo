@@ -7,7 +7,6 @@ filtering; authoritative area is computed in Python.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 import uuid
@@ -71,22 +70,6 @@ CREATE TABLE IF NOT EXISTS sync_ops (
     payload    TEXT NOT NULL,
     applied_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS params (
-    key        TEXT PRIMARY KEY,
-    value_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
--- 区域化的模型系数：彭曼公式的标定系数随气候区不同，按行政区层级覆盖
-CREATE TABLE IF NOT EXISTS param_scopes (
-    scope      TEXT NOT NULL,           -- 'global' | 'province:370000' | 'city:370500'
-    param      TEXT NOT NULL,
-    value      REAL NOT NULL,
-    updated_at TEXT NOT NULL,
-    updated_by TEXT,
-    PRIMARY KEY (scope, param)
-);
 """
 
 _local = threading.local()
@@ -138,20 +121,3 @@ def init_db() -> None:
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
-
-
-# --- parameters -----------------------------------------------------------
-
-
-def get_param(key: str, default: Any = None) -> Any:
-    row = get_conn().execute("SELECT value_json FROM params WHERE key = ?", (key,)).fetchone()
-    return json.loads(row["value_json"]) if row else default
-
-
-def set_param(key: str, value: Any) -> None:
-    with transaction() as conn:
-        conn.execute(
-            "INSERT INTO params(key, value_json, updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
-            (key, json.dumps(value, ensure_ascii=False), now_iso()),
-        )

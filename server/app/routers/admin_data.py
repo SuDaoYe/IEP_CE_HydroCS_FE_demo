@@ -9,7 +9,6 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from .. import db, deps, repository
 from ..services import geo, irrigation, meteo, regions
-from ..services import params as parameter_service
 
 router = APIRouter(prefix="/admin", tags=["admin-data"])
 
@@ -144,9 +143,6 @@ def regions_overview(
             crop=field["crop"],
             stage_key=field["stage_key"],
             days=days,
-            params=parameter_service.params_for_plan(
-                parameter_service.resolve_for_ring(rings[0])
-            ),
         )
         bucket["volume_m3"] += plan["totals"]["volume_m3"]
         bucket["net_volume_m3"] += plan["totals"].get("net_volume_m3", 0.0)
@@ -221,9 +217,6 @@ def regions_summary(
             crop=field["crop"],
             stage_key=field["stage_key"],
             days=days,
-            params=parameter_service.params_for_plan(
-                parameter_service.resolve_for_ring(rings[0])
-            ),
         )
         volume = plan["totals"]["volume_m3"]
         totals["fields"] += 1

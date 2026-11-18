@@ -4,18 +4,16 @@ import { fmtDateTime, fmtMu, fmtM3, fmtNumber } from '../lib/format'
 import { useUI } from '../store/ui'
 import { Empty, Icon, SectionTitle, Spinner, Stat } from '../components/ui'
 import MeteoPanel from './admin/MeteoPanel'
-import ParamPanel from './admin/ParamPanel'
 import RegionPanel from './admin/RegionPanel'
 import type { AdminStats, Field, HistoryLog, User } from '../types'
 
-type Tab = 'overview' | 'region' | 'meteo' | 'data' | 'params'
+type Tab = 'overview' | 'region' | 'meteo' | 'data'
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'overview', label: '概览', icon: 'map' },
   { key: 'region', label: '行政区需水', icon: 'fields' },
   { key: 'meteo', label: '气象数据', icon: 'layers' },
   { key: 'data', label: '用户与田块', icon: 'users' },
-  { key: 'params', label: '模型参数', icon: 'settings' },
 ]
 
 export default function Admin() {
@@ -63,7 +61,7 @@ export default function Admin() {
       <div className="mx-auto max-w-[1080px]">
         <h1 className="text-[17px] font-semibold text-[var(--hc-ink)]">管理后台</h1>
         <p className="mt-1 text-[11.5px] text-[var(--hc-faint)]">
-          用户、田块、行政区需水汇总、气象数据导入与模型参数
+          用户、田块、行政区需水汇总、气象数据导入与模型状态
         </p>
 
         <div className="mt-3 flex gap-1 overflow-x-auto rounded-xl border border-[var(--hc-line)] bg-[var(--hc-surface)] p-1">
@@ -152,6 +150,33 @@ export default function Admin() {
               </li>
               <li className="flex items-center gap-2">
                 <Icon
+                  name={stats?.et_model?.available ? 'check' : 'info'}
+                  size={13}
+                  className={stats?.et_model?.available ? 'text-[var(--hc-accent)]' : 'text-[var(--hc-amber)]'}
+                />
+                <span className="text-[var(--hc-muted)]">ET 预测模型</span>
+                <span className="hc-num ml-auto text-[var(--hc-ink)]">
+                  {stats?.et_model?.available
+                    ? `${String(stats.et_model.window ?? '')} 天窗口 · ${String(stats.et_model.features ?? '')} 特征`
+                    : '未加载（退回 FAO-56）'}
+                </span>
+              </li>
+              {stats?.et_model?.available && stats.et_model.test_metrics && (
+                <li className="rounded-lg border border-[var(--hc-line)] bg-[var(--hc-surface-2)] p-2 text-[10.5px] leading-relaxed text-[var(--hc-faint)]">
+                  {String(stats.et_model.train_years?.join('–') ?? '')} 训练 ·{' '}
+                  {String(stats.et_model.valid_year ?? '')} 选窗 ·{' '}
+                  {String(stats.et_model.test_year ?? '')} 测试 RMSE{' '}
+                  <span className="hc-num text-[var(--hc-ink)]">
+                    {Number(stats.et_model.test_metrics.rmse ?? 0).toFixed(2)}
+                  </span>{' '}
+                  mm · R²{' '}
+                  <span className="hc-num text-[var(--hc-ink)]">
+                    {Number(stats.et_model.test_metrics.r2 ?? 0).toFixed(3)}
+                  </span>
+                </li>
+              )}
+              <li className="flex items-center gap-2">
+                <Icon
                   name={stats?.era5?.available ? 'check' : 'info'}
                   size={13}
                   className={stats?.era5?.available ? 'text-[var(--hc-accent)]' : 'text-[var(--hc-amber)]'}
@@ -191,9 +216,6 @@ export default function Admin() {
         </div>
           </>
         )}
-
-        {/* params：系数按行政区继承（全局 → 省 → 市） */}
-        {tab === 'params' && <ParamPanel />}
 
         {tab === 'data' && (
           <>

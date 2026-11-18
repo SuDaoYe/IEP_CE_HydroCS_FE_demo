@@ -8,7 +8,6 @@ import type {
   IrrigationPlan,
   IrrigationSummary,
   MeteoStatus,
-  ParamScope,
   PlaceResult,
   ProviderInfo,
   RegionHit,
@@ -179,13 +178,6 @@ export const api = {
   adminFields: () => request<Field[]>('/admin/fields'),
   adminStats: (days = 7) => request<AdminStats>(`/admin/stats?days=${days}`),
   adminLogs: () => request<HistoryLog[]>('/admin/logs'),
-  adminParams: (scope = 'global') =>
-    request<ParamScope>(`/admin/params?scope=${encodeURIComponent(scope)}`),
-  adminUpdateParams: (scope: string, values: Record<string, number | null>) =>
-    request<ParamScope>('/admin/params', {
-      method: 'PATCH',
-      body: JSON.stringify({ scope, values }),
-    }),
 }
 
 export function tileUrl(provider: string, z: number, x: number, y: number) {

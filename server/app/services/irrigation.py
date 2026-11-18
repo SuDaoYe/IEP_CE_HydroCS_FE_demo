@@ -25,7 +25,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from . import era5, et_grid, geo
+from . import era5, et_grid, et_model, geo
 
 # FAO-56 style crop coefficients, trimmed to the stages farmers actually pick.
 CROPS: dict[str, dict[str, Any]] = {
@@ -129,6 +129,8 @@ CROPS: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_KC_REFERENCE = 0.95  # winter wheat mid-season, dominant crop in the domain
+KC_REFERENCE = DEFAULT_KC_REFERENCE
+DEFAULT_EFFICIENCY = 0.85  # 灌溉水利用系数（固定，不再作为可调参数）
 
 
 def crop_catalog() -> list[dict]:
@@ -251,6 +253,22 @@ def merge_series(plans: list[dict]) -> list[dict]:
     return [merged[key] for key in sorted(merged)]
 
 
+def _et_for_day(ring: geo.Ring, day: dt.date) -> tuple[float | None, str, str | None]:
+    """按"模型 → Penman–Monteith → ETMonitor"的顺序取一天的 ET。"""
+    if et_model.load() is not None:
+        row = et_model.predict_day(ring, day)
+        if row.get("et_mm_day") is not None:
+            return float(row["et_mm_day"]), "model", row.get("source")
+    if era5.load() is not None:
+        row = era5.day_values(ring, day)
+        if row.get("et0_mm") is not None:
+            return float(row["et0_mm"]), "pm", row.get("source")
+    row = et_grid.et_for_ring(ring, day)
+    if row.get("et_mm_day") is not None:
+        return float(row["et_mm_day"]), "etmonitor", row.get("source")
+    return None, "none", None
+
+
 def compute_plan(
     ring: geo.Ring,
     area_m2: float,
@@ -260,14 +278,18 @@ def compute_plan(
     start: dt.date | None = None,
     params: dict[str, Any] | None = None,
 ) -> dict:
-    params = params or {}
-    efficiency = float(params.get("efficiency", 0.85)) or 0.85
-    kc_reference = float(params.get("kc_reference", DEFAULT_KC_REFERENCE)) or DEFAULT_KC_REFERENCE
-    kc_scale = float(params.get("kc_scale", 1.0)) or 1.0
-    rain_ratio = params.get("effective_rain_ratio", 1.0)
-    rain_ratio = 1.0 if rain_ratio is None else float(rain_ratio)
-    rain_override = float(params.get("effective_rain_mm_day", 0.0) or 0.0)
+    """按"训练模型优先"的顺序解算需水量。
 
+    三种 ET 来源，优先级从高到低：
+
+    1. ``model-hgb``  —— 训练好的日 ET 模型（ERA5 驱动，2004 测试 RMSE ≈0.52 mm/day）
+    2. ``era5-pm``    —— 模型缺失时退回 FAO-56 Penman–Monteith 参考蒸散
+    3. ``etmonitor``  —— ERA5 也缺失时用 ETMonitor 观测格点反推
+
+    系数不再可调（参数微调功能已下线）。``params`` 仅为测试保留 η 覆盖，
+    其余键一律忽略。
+    """
+    efficiency = float((params or {}).get("efficiency", DEFAULT_EFFICIENCY)) or DEFAULT_EFFICIENCY
     start = start or dt.date.today()
     days = max(1, min(int(days), 180))
 
@@ -276,83 +298,72 @@ def compute_plan(
     percolation = float(spec.get("percolation_mm_day", 0.0)) if spec.get("paddy") else 0.0
 
     have_era5 = era5.load() is not None
-    method = "era5-pm" if have_era5 else "etmonitor-inverse"
+
+    # 用户作物相对参考作物的系数：模型/网格给的是像素实际蒸散
+    crop_factor = kc / KC_REFERENCE if KC_REFERENCE else kc
 
     series: list[dict] = []
     cumulative = 0.0
     extrapolated = False
 
-    if have_era5:
-        rows = era5.series(ring, start, days)
-        for row in rows:
-            et0 = float(row["et0_mm"])
-            precip = float(row.get("precip_mm") or 0.0)
-            pe = rain_override if rain_override > 0 else float(row.get("pe_mm") or 0.0) * rain_ratio
-            etc = kc * et0 * kc_scale
-            net = max(0.0, etc + percolation - pe)
-            gross = net / efficiency
-            net_volume = net * area_m2 / 1000.0
-            volume = gross * area_m2 / 1000.0
-            cumulative += volume
-            extrapolated = extrapolated or bool(row.get("extrapolated"))
-            envelope = era5.envelope(ring, dt.date.fromisoformat(row["date"]))
-            series.append(
-                {
-                    "date": row["date"],
-                    "et0_mm": round(et0, 3),
-                    "precip_mm": round(precip, 3),
-                    "pe_mm": round(pe, 3),
-                    "kc": round(kc, 3),
-                    "etc_mm": round(etc, 3),
-                    "percolation_mm": round(percolation, 3),
-                    "net_mm": round(net, 3),
-                    "gross_mm": round(gross, 3),
-                    "net_volume_m3": round(net_volume, 2),
-                    "volume_m3": round(volume, 2),
-                    "cumulative_m3": round(cumulative, 2),
-                    "t2m_c": row.get("t2m_c"),
-                    "vpd_kpa": row.get("vpd_kpa"),
-                    "et0_min": envelope.get("et0_min"),
-                    "et0_max": envelope.get("et0_max"),
-                    "precip_max": envelope.get("precip_max"),
-                    "source": row.get("source"),
-                    "extrapolated": row.get("extrapolated", False),
-                }
-            )
+    bases: list[str] = []
+    for offset in range(days):
+        day = start + dt.timedelta(days=offset)
+
+        et_value, et_basis, et_source = _et_for_day(ring, day)
+        if et_value is None:
+            continue
+        bases.append(et_basis)
+        et_label = {"model": "ET_pred_mm", "pm": "et0_mm"}.get(et_basis, "et_grid_mm")
+
+        rain = era5.day_values(ring, day) if have_era5 else {"precip_mm": None, "pe_mm": 0.0}
+        precip = float(rain.get("precip_mm") or 0.0)
+        pe = float(rain.get("pe_mm") or 0.0)
+
+        etc = et_value * crop_factor
+        net = max(0.0, etc + percolation - pe)
+        gross = net / efficiency
+        net_volume = net * area_m2 / 1000.0
+        volume = gross * area_m2 / 1000.0
+        cumulative += volume
+        extrapolated = extrapolated or bool(rain.get("extrapolated"))
+
+        entry = {
+            "date": day.isoformat(),
+            "et_mm": round(et_value, 3),
+            "precip_mm": round(precip, 3),
+            "pe_mm": round(pe, 3),
+            "kc": round(kc, 3),
+            "crop_factor": round(crop_factor, 4),
+            "etc_mm": round(etc, 3),
+            "percolation_mm": round(percolation, 3),
+            "net_mm": round(net, 3),
+            "gross_mm": round(gross, 3),
+            "net_volume_m3": round(net_volume, 2),
+            "volume_m3": round(volume, 2),
+            "cumulative_m3": round(cumulative, 2),
+            "source": et_source,
+            "et_basis": et_basis,
+        }
+        # 兼容前端既有字段名
+        entry[et_label] = round(et_value, 3)
+        if et_basis == "pm":
+            entry["et0_min"] = None
+            entry["et0_max"] = None
+        series.append(entry)
+
+    if not series:
+        raise ValueError("没有可用的 ET 数据，无法解算")
+
+    unique_bases = set(bases)
+    if unique_bases == {"model"}:
+        method = "model-hgb"
+    elif unique_bases == {"pm"}:
+        method = "era5-pm"
+    elif unique_bases == {"etmonitor"}:
+        method = "etmonitor"
     else:
-        et_rows = et_grid.et_series(ring, start, days)
-        for row in et_rows:
-            et_value = float(row["et_mm_day"])
-            et0 = et_value / kc_reference if kc_reference else et_value
-            etc = kc * et0 * kc_scale
-            pe = rain_override
-            net = max(0.0, etc + percolation - pe)
-            gross = net / efficiency
-            net_volume = net * area_m2 / 1000.0
-            volume = gross * area_m2 / 1000.0
-            cumulative += volume
-            extrapolated = extrapolated or bool(row.get("extrapolated"))
-            series.append(
-                {
-                    "date": row["date"],
-                    "et0_mm": round(et0, 3),
-                    "et_grid_mm": round(et_value, 3),
-                    "precip_mm": None,
-                    "pe_mm": round(pe, 3),
-                    "kc": round(kc, 3),
-                    "etc_mm": round(etc, 3),
-                    "percolation_mm": round(percolation, 3),
-                    "net_mm": round(net, 3),
-                    "gross_mm": round(gross, 3),
-                    "net_volume_m3": round(net_volume, 2),
-                    "volume_m3": round(volume, 2),
-                    "cumulative_m3": round(cumulative, 2),
-                    "et0_min": row.get("et_min"),
-                    "et0_max": row.get("et_max"),
-                    "source": row.get("source"),
-                    "extrapolated": row.get("extrapolated", False),
-                }
-            )
+        method = "mixed"
 
     total_net_mm = sum(r["net_mm"] for r in series)
     total_gross_mm = sum(r["gross_mm"] for r in series)
@@ -361,44 +372,52 @@ def compute_plan(
     total_rain = sum(r.get("precip_mm") or 0.0 for r in series)
     total_pe = sum(r["pe_mm"] for r in series)
     mu = area_m2 * geo.MU_PER_M2
+    days = len(series)
 
     assumptions: list[str] = []
-    if have_era5:
+    if method == "model-hgb":
+        bundle = et_model.load()
+        metrics = bundle.test_metrics if bundle else {}
         assumptions.append(
-            "ET0 由 ERA5 逐小时数据按 FAO-56 Penman–Monteith 计算（日均气温、饱和差、风速、净辐射、气压）"
+            "ET 由训练好的日蒸散模型给出（ERA5 六要素 30 天窗口 → ETMonitor 日 ET，"
+            f"{bundle.valid_year if bundle else ''}/{bundle.test_year if bundle else ''} 测试集 RMSE "
+            f"{metrics.get('rmse', '—')} mm/day、R² {metrics.get('r2', '—')}）"
         )
         assumptions.append(
-            "有效降雨 Pe 由 ERA5 日降水按"
-            f"利用系数 {rain_ratio:.2f}、上限 35 mm/天 估算"
-            + (f"；管理端已改为固定 {rain_override:.1f} mm/天" if rain_override > 0 else "")
+            f"模型输出的是该格点实际蒸散，按本作物 Kc({kc:.2f}) 与参考作物 Kc({KC_REFERENCE:.2f}) 的比值缩放"
         )
-        assumptions.append("逐日 ET0 与降水按田块与 0.25° 网格的面积重叠加权，不是单点取值")
+    elif method == "era5-pm":
+        assumptions.append("模型不可用，退回 FAO-56 Penman–Monteith 参考蒸散 ET0")
+        assumptions.append(f"ET0 按作物系数 Kc({kc:.2f}) 与参考作物 Kc({KC_REFERENCE:.2f}) 的比值换算")
     else:
-        assumptions.append("ET 取自 ETMonitor 2000–2004 日蒸散网格（未能加载 ERA5 资产，已退回近似法）")
-        assumptions.append(
-            f"网格 ET 视为主导作物（Kc≈{kc_reference:.2f}）的实际蒸散，据此反推参考蒸散 ET0 后再按本作物的 Kc 缩放"
-        )
-        assumptions.append("有效降雨 Pe 尚未接入 ERA5 降水，按 0 计（保守估计，会高估需水量）")
+        assumptions.append("模型与 ERA5 均不可用，退回 ETMonitor 观测格点（近似法）")
 
+    if have_era5:
+        assumptions.append("有效降雨 Pe 由 ERA5 日降水换算（利用系数 0.8、日上限 35 mm），按田块与网格面积重叠加权")
+    else:
+        assumptions.append("缺少 ERA5 降水，有效降雨按 0 计（保守上界）")
+    assumptions.append("逐日 ET 与降水按田块与 0.25° 网格的面积重叠加权，不是单点取值")
     if spec.get("paddy"):
         assumptions.append(f"水田渗漏按 {percolation:.1f} mm/天 计入")
     if extrapolated:
-        assumptions.append("部分日期超出 2000–2004 观测范围或位于数据域外，已用同日序气候态/经验模型外推")
-    assumptions.append(f"灌溉水利用系数 η={efficiency:.2f}，可通过管理端调整")
+        assumptions.append("部分日期超出 2000–2004 观测范围或位于数据域外，已用同日序气候态外推")
+    assumptions.append(f"灌溉水利用系数 η={efficiency:.2f}（固定值，参数微调功能已下线）")
 
     return {
-        "window": {
-            "start": series[0]["date"] if series else start.isoformat(),
-            "days": days,
-        },
+        "window": {"start": series[0]["date"], "days": days},
         "method": method,
+        "et_source": {
+            "basis": series[0].get("et_basis"),
+            "model": et_model.status(),
+            "era5": era5.status(),
+        },
         "crop": {
             "key": crop or "other",
             "label": crop_label,
             "stage_key": stage_key,
             "stage_label": stage_label,
             "kc": round(kc, 3),
-            "kc_scale": kc_scale,
+            "crop_factor": round(crop_factor, 4),
             "paddy": bool(spec.get("paddy")),
         },
         "area": {
@@ -408,9 +427,9 @@ def compute_plan(
         },
         "params": {
             "efficiency": efficiency,
-            "kc_reference": kc_reference,
-            "effective_rain_ratio": rain_ratio,
-            "effective_rain_mm_day": rain_override,
+            "kc_reference": KC_REFERENCE,
+            "effective_rain_ratio": 1.0,
+            "effective_rain_mm_day": 0.0,
         },
         "series": series,
         "totals": {
@@ -418,11 +437,8 @@ def compute_plan(
             "gross_mm": round(total_gross_mm, 2),
             "rain_mm": round(total_rain, 2),
             "pe_mm": round(total_pe, 2),
-            # 需要灌溉的水量（净）——真正补进根区的部分
             "net_volume_m3": round(total_net_volume, 1),
-            # 总水量（毛）——计入输水/灌溉损失后从水源实际抽取
             "gross_volume_m3": round(total_volume, 1),
-            # 兼容旧字段：volume_m3 一直是总水量
             "volume_m3": round(total_volume, 1),
             "daily_avg_m3": round(total_volume / days, 2),
             "daily_avg_net_m3": round(total_net_volume / days, 2),

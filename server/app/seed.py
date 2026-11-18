@@ -188,17 +188,6 @@ def ensure_seed() -> None:
                     db.now_iso(),
                 ),
             )
-
-    db.set_param(
-        "irrigation",
-        {
-            "efficiency": 0.85,
-            "kc_reference": 0.95,
-            "kc_scale": 1.0,
-            "effective_rain_mm_day": 0.0,
-            "effective_rain_ratio": 1.0,
-        },
-    )
     log.info("seeded %s users and %s fields", len(ACCOUNTS), len(FIELDS))
 
 

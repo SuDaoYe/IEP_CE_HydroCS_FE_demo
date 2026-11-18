@@ -51,7 +51,10 @@ def main() -> int:
             day = data["series"][0]
             print(
                 "  day0:",
-                {k: day.get(k) for k in ("date", "et0_mm", "precip_mm", "pe_mm", "etc_mm", "net_mm", "volume_m3")},
+                {
+                    k: day.get(k)
+                    for k in ("date", "et_mm", "et_basis", "precip_mm", "pe_mm", "etc_mm", "net_mm", "volume_m3")
+                },
             )
             print("  assumptions:", data["assumptions"][:2])
 

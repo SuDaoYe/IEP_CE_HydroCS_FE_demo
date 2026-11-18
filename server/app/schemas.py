@@ -125,16 +125,6 @@ class SyncResult(BaseModel):
     fields: list[FieldOut] = Field(default_factory=list)
 
 
-class ParamsUpdate(BaseModel):
-    """按行政区作用域写覆盖：scope 形如 global / province:370000 / city:370500。
-
-    ``values`` 里某个参数传 null 表示删除该层覆盖、回退到上一层。
-    """
-
-    scope: str = Field(default="global", pattern=r"^(global|province:\d{2,6}|city:\d{2,6})$")
-    values: dict[str, float | None] = Field(default_factory=dict)
-
-
 class HealthOut(BaseModel):
     ok: bool
     app: str

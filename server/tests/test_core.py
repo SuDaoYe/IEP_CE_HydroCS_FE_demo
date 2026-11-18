@@ -303,40 +303,32 @@ def test_gridmath_weights_normalise_across_cells():
     assert all(w == pytest.approx(0.25, abs=1e-6) for _, _, w in weights)
 
 
-def test_plan_uses_era5_balance():
+def test_plan_prefers_trained_model():
     ring = [(118.7975, 37.7990), (118.7985, 37.7990), (118.7985, 37.8000), (118.7975, 37.8000)]
     area = geo.geodesic_area_m2(ring)
     plan = irrigation.compute_plan(
         ring, area, "wheat", "jointing", 5, dt.date(2003, 4, 10),
         {"efficiency": 0.85, "effective_rain_ratio": 1.0},
     )
-    assert plan["method"] == "era5-pm"
+    assert plan["method"] == "model-hgb"
+    assert plan["series"][0]["et_basis"] == "model"
     assert plan["totals"]["pe_mm"] >= 0
     for row in plan["series"]:
-        assert row["et0_mm"] > 0
+        assert row["et_mm"] > 0
         assert row["net_mm"] == pytest.approx(
             max(0.0, row["etc_mm"] + row["percolation_mm"] - row["pe_mm"]), abs=1e-6
         )
-        assert row["etc_mm"] == pytest.approx(row["kc"] * row["et0_mm"], abs=0.002)
+        assert row["etc_mm"] == pytest.approx(row["et_mm"] * row["crop_factor"], abs=0.002)
     assert any("ERA5" in line for line in plan["assumptions"])
-
-
-def test_rain_override_zeroes_demand_when_generous():
-    ring = [(118.7975, 37.7990), (118.7985, 37.7990), (118.7985, 37.8000), (118.7975, 37.8000)]
-    area = geo.geodesic_area_m2(ring)
-    plan = irrigation.compute_plan(
-        ring, area, "maize", "jointing", 3, dt.date(2003, 7, 1),
-        {"efficiency": 0.85, "effective_rain_mm_day": 30.0},
-    )
-    assert plan["totals"]["volume_m3"] == 0.0
 
 
 def test_plan_falls_back_to_etmonitor_without_era5(monkeypatch):
     monkeypatch.setattr(irrigation.era5, "load", lambda: None)
+    monkeypatch.setattr(irrigation.et_model, "load", lambda: None)
     ring = [(118.7975, 37.7990), (118.7985, 37.7990), (118.7985, 37.8000), (118.7975, 37.8000)]
     area = geo.geodesic_area_m2(ring)
     plan = irrigation.compute_plan(ring, area, "wheat", "jointing", 3, dt.date(2003, 4, 10), {})
-    assert plan["method"] == "etmonitor-inverse"
+    assert plan["method"] == "etmonitor"
     assert any("ETMonitor" in line for line in plan["assumptions"])
 
 
@@ -472,83 +464,6 @@ def test_summary_merges_rollups_across_fields():
 # --- region-scoped parameters --------------------------------------------
 
 
-def test_param_scope_inheritance(client):
-    admin = auth_headers(client, "admin", "admin123")
-
-    base = client.get("/api/v1/admin/params?scope=global", headers=admin).json()
-    assert base["values"]["kc_scale"] == pytest.approx(1.0)
-    assert base["sources"]["kc_scale"] in {"default", "global"}
-
-    # province override propagates to its cities
-    client.patch(
-        "/api/v1/admin/params",
-        json={"scope": "province:370000", "values": {"kc_scale": 1.2}},
-        headers=admin,
-    )
-    city = client.get("/api/v1/admin/params?scope=city:370500", headers=admin).json()
-    assert city["values"]["kc_scale"] == pytest.approx(1.2)
-    assert city["sources"]["kc_scale"] == "province:370000"
-
-    # city override wins and is attributed to the city
-    client.patch(
-        "/api/v1/admin/params",
-        json={"scope": "city:370500", "values": {"kc_scale": 0.8}},
-        headers=admin,
-    )
-    city = client.get("/api/v1/admin/params?scope=city:370500", headers=admin).json()
-    assert city["values"]["kc_scale"] == pytest.approx(0.8)
-    assert city["sources"]["kc_scale"] == "city:370500"
-
-    # clearing the city value falls back to the province
-    client.patch(
-        "/api/v1/admin/params",
-        json={"scope": "city:370500", "values": {"kc_scale": None}},
-        headers=admin,
-    )
-    city = client.get("/api/v1/admin/params?scope=city:370500", headers=admin).json()
-    assert city["values"]["kc_scale"] == pytest.approx(1.2)
-    assert city["sources"]["kc_scale"] == "province:370000"
-
-
-def test_param_scope_rejects_bad_values(client):
-    admin = auth_headers(client, "admin", "admin123")
-    bad = client.patch(
-        "/api/v1/admin/params",
-        json={"scope": "city:370500", "values": {"kc_scale": 99}},
-        headers=admin,
-    )
-    assert bad.status_code == 422
-    unknown = client.patch(
-        "/api/v1/admin/params",
-        json={"scope": "city:370500", "values": {"nope": 1}},
-        headers=admin,
-    )
-    assert unknown.status_code == 422
-
-
-def test_field_demand_follows_regional_params(client):
-    admin = auth_headers(client, "admin", "admin123")
-    farmer = auth_headers(client, "farmer1", "123456")
-    field = client.get("/api/v1/fields", headers=farmer).json()[0]
-
-    before = client.get(f"/api/v1/fields/{field['id']}/irrigation?days=7", headers=farmer).json()
-    assert before["parameter_scope"]["scope"] == "city:370500"
-
-    client.patch(
-        "/api/v1/admin/params",
-        json={"scope": "city:370500", "values": {"kc_scale": 2.0}},
-        headers=admin,
-    )
-    after = client.get(f"/api/v1/fields/{field['id']}/irrigation?days=7", headers=farmer).json()
-    assert after["parameter_scope"]["values"]["kc_scale"] == pytest.approx(2.0)
-    # doubling Kc_scale lifts demand clearly (net of rain + percolation, so < 2x)
-    assert after["totals"]["volume_m3"] > before["totals"]["volume_m3"] * 1.3
-
-    # other regions keep the global value
-    elsewhere = client.get("/api/v1/admin/params?scope=city:110101", headers=admin).json()
-    assert elsewhere["values"]["kc_scale"] == pytest.approx(1.0)
-
-
 def test_totals_report_both_net_and_gross_volumes():
     ring = [(118.7975, 37.7990), (118.7985, 37.7990), (118.7985, 37.8000), (118.7975, 37.8000)]
     area = geo.geodesic_area_m2(ring)
@@ -585,3 +500,43 @@ def test_summary_reports_net_and_gross():
     assert summary["week_net_m3"] < summary["week_m3"]
     assert summary["daily_net_m3"] <= summary["daily_m3"]
     assert summary["week_m3"] == pytest.approx(plan["totals"]["gross_volume_m3"], abs=1.0)
+
+
+# --- trained ET model -----------------------------------------------------
+
+
+def test_et_model_artifact_loads_with_metrics():
+    from app.services import et_model
+
+    status = et_model.status()
+    assert status["available"], status
+    assert status["window"] >= 1
+    assert status["features"] == status["window"] * 6
+    for key in ("rmse", "mae", "r2"):
+        assert status["test_metrics"][key] is not None
+    # 与 ETMonitor 目标量级一致（mm/day 个位数）
+    assert 0.2 < status["test_metrics"]["rmse"] < 2.0
+    assert status["test_metrics"]["r2"] > 0.7
+
+
+def test_et_model_predicts_observed_and_climatology_days():
+    from app.services import et_model
+
+    ring = [(118.7975, 37.7990), (118.7985, 37.7990), (118.7985, 37.8000), (118.7975, 37.8000)]
+    summer = et_model.predict_day(ring, dt.date(2004, 7, 15))
+    assert summer["source"] == "model"
+    assert 1.0 < summer["et_mm_day"] < 12.0
+
+    future = et_model.predict_day(ring, dt.date(2026, 10, 30))
+    assert future["source"] == "model-climatology"
+    assert 0.0 <= future["et_mm_day"] < 12.0
+
+
+def test_plan_reports_model_provenance():
+    ring = [(118.7975, 37.7990), (118.7985, 37.7990), (118.7985, 37.8000), (118.7975, 37.8000)]
+    area = geo.geodesic_area_m2(ring)
+    plan = irrigation.compute_plan(ring, area, "rice", "booting", 5, dt.date(2004, 7, 10))
+    assert plan["method"] == "model-hgb"
+    assert plan["et_source"]["basis"] == "model"
+    assert plan["et_source"]["model"]["available"] is True
+    assert any("训练好的日蒸散模型" in line for line in plan["assumptions"])

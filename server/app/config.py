@@ -88,6 +88,11 @@ class Settings:
     era5_path: Path = field(
         default_factory=lambda: Path(os.getenv("HYDROCS_ERA5", ARTIFACTS_DIR / "era5_daily.npz"))
     )
+    et_model_path: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("HYDROCS_ET_MODEL", ARTIFACTS_DIR / "models" / "et_model.joblib")
+        )
+    )
     admin_dir: Path = field(
         default_factory=lambda: Path(os.getenv("HYDROCS_ADMIN_DIV", ARTIFACTS_DIR / "admin"))
     )

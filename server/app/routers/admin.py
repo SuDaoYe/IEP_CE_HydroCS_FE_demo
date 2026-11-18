@@ -1,4 +1,4 @@
-"""Administrator endpoints: users, all fields, statistics and model parameters."""
+"""Administrator endpoints: users, all fields, statistics and service status."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import db, deps, repository
-from ..schemas import ParamsUpdate, UserOut
-from ..services import era5, et_grid, geo, irrigation, segmentation
-from ..services import params as parameter_service
+from ..schemas import UserOut
+from ..services import era5, et_grid, et_model, geo, irrigation, segmentation
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -79,13 +78,10 @@ def stats(admin: deps.AdminUser, days: int = Query(default=7, ge=1, le=180)) -> 
         crop_mix[key] = round(crop_mix.get(key, 0.0) + field["area_mu"], 2)
 
     plans = []
-    scope_summary: dict[str, int] = {}
     for field in fields:
         rings = geo.rings_from_geojson(field["geometry"])
         if not rings:
             continue
-        resolved = parameter_service.resolve_for_ring(rings[0])
-        scope_summary[resolved.scope] = scope_summary.get(resolved.scope, 0) + 1
         plans.append(
             irrigation.compute_plan(
                 ring=rings[0],
@@ -93,7 +89,6 @@ def stats(admin: deps.AdminUser, days: int = Query(default=7, ge=1, le=180)) -> 
                 crop=field["crop"],
                 stage_key=field["stage_key"],
                 days=days,
-                params=parameter_service.params_for_plan(resolved),
             )
         )
     totals = irrigation.summarize(plans)
@@ -110,42 +105,11 @@ def stats(admin: deps.AdminUser, days: int = Query(default=7, ge=1, le=180)) -> 
         "week_m3": totals["week_m3"],
         "by_date": totals["by_date"],
         "crop_mix": [{"crop": k, "area_mu": v} for k, v in sorted(crop_mix.items(), key=lambda kv: -kv[1])],
-        "parameter_scopes": scope_summary,
         "segmentation": segmentation.backend_status(),
+        "et_model": et_model.status(),
         "et_grid": et_grid.status(),
         "era5": era5.status(),
     }
-
-
-@router.get("/params")
-def get_params(admin: deps.AdminUser, scope: str = "global") -> dict[str, Any]:
-    """生效值 + 每一项来自哪一层（global / province / city）。"""
-    try:
-        payload = parameter_service.describe(scope)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return {
-        **payload,
-        "scopes": parameter_service.list_scopes(),
-        "crops": irrigation.crop_catalog(),
-        "segmentation": {
-            **segmentation.backend_status(),
-            "conf": 0.25,
-            "imgsz": 1024,
-        },
-    }
-
-
-@router.patch("/params")
-def patch_params(payload: ParamsUpdate, admin: deps.AdminUser) -> dict[str, Any]:
-    """写某个作用域的覆盖值；传 null 表示删除该层覆盖、回退到上一层。"""
-    try:
-        updated = parameter_service.update(
-            payload.scope, payload.values, admin["id"]
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return {**updated, "scopes": parameter_service.list_scopes()}
 
 
 @router.get("/logs")

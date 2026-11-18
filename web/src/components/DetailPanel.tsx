@@ -263,7 +263,13 @@ export default function DetailPanel() {
                   {plan.method && (
                     <div className="flex items-center gap-1.5 text-[10px] text-[var(--hc-faint)]">
                       <span className="hc-chip border-[var(--hc-accent)]/40 text-[var(--hc-accent)]">
-                        {plan.method === 'era5-pm' ? 'ERA5 · FAO-56' : 'ETMonitor 近似'}
+                        {plan.method === 'model-hgb'
+                          ? '训练模型 · 30 天窗口'
+                          : plan.method === 'era5-pm'
+                            ? 'ERA5 · FAO-56'
+                            : plan.method === 'mixed'
+                              ? '模型 + 物理混合'
+                              : 'ETMonitor 近似'}
                       </span>
                       期间降雨 {fmtNumber(plan.totals.rain_mm ?? 0, 1)} mm ·
                       有效 {fmtNumber(plan.totals.pe_mm ?? 0, 1)} mm
@@ -363,7 +369,7 @@ export default function DetailPanel() {
                       <thead className="bg-[var(--hc-canvas)] text-[var(--hc-faint)]">
                         <tr>
                           <th className="px-2 py-1.5 text-left font-medium">日期</th>
-                          <th className="px-2 py-1.5 text-right font-medium">ET0</th>
+                          <th className="px-2 py-1.5 text-right font-medium">ET</th>
                           <th className="px-2 py-1.5 text-right font-medium">降雨</th>
                           <th className="px-2 py-1.5 text-right font-medium">需水 mm</th>
                           <th className="px-2 py-1.5 text-right font-medium">水量 m³</th>
@@ -374,7 +380,7 @@ export default function DetailPanel() {
                           <tr key={day.date} className="border-t border-[var(--hc-line)]">
                             <td className="px-2 py-1.5 text-left text-[var(--hc-muted)]">{fmtDate(day.date)}</td>
                             <td className="px-2 py-1.5 text-right text-[var(--hc-faint)]">
-                              {day.et0_mm.toFixed(2)}
+                              {(day.et_mm ?? day.et0_mm ?? 0).toFixed(2)}
                             </td>
                             <td className="px-2 py-1.5 text-right text-[var(--hc-sky)]">
                               {day.precip_mm ? day.precip_mm.toFixed(1) : '—'}

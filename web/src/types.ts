@@ -79,6 +79,9 @@ export interface IrrigationDay {
   precip_mm?: number | null
   pe_mm: number
   et_grid_mm?: number
+  /** 模型/ERA5/ETMonitor 给出的当日 ET（mm），是新版主口径 */
+  et_mm?: number
+  et_basis?: string | null
   t2m_c?: number | null
   vpd_kpa?: number | null
   et0_min?: number | null
@@ -107,7 +110,7 @@ export interface IrrigationPlan {
     paddy: boolean
   }
   area: { m2: number; mu: number; ha: number }
-  method?: 'era5-pm' | 'etmonitor-inverse'
+  method?: 'model-hgb' | 'era5-pm' | 'etmonitor' | 'mixed'
   params: {
     efficiency: number
     kc_reference: number
@@ -229,6 +232,17 @@ export interface AdminStats {
   by_date: { date: string; volume_m3: number }[]
   crop_mix: { crop: string; area_mu: number }[]
   segmentation: { backend: string; weights_present: boolean; error: string | null }
+  et_model?: {
+    available: boolean
+    error?: string | null
+    window?: number
+    features?: number
+    train_years?: number[]
+    valid_year?: number
+    test_year?: number
+    valid_metrics?: { rmse?: number; mae?: number; r2?: number }
+    test_metrics?: { rmse?: number; mae?: number; r2?: number }
+  }
   et_grid: { available: boolean; error?: string | null; domain?: Record<string, unknown> }
   era5?: { available: boolean; error?: string | null; domain?: Record<string, unknown> }
 }

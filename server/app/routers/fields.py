@@ -11,7 +11,6 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 from .. import db, deps, repository
 from ..schemas import FieldCreate, FieldOut, FieldUpdate
 from ..services import geo, irrigation
-from ..services import params as parameter_service
 
 router = APIRouter(prefix="/fields", tags=["fields"])
 
@@ -101,8 +100,6 @@ def field_irrigation(
     if not rings:
         raise HTTPException(422, "田块几何无效")
     start_date = dt.date.fromisoformat(start) if start else dt.date.today()
-    # 系数按田块所在行政区解析：全局 → 省 → 市，就近覆盖
-    resolved = parameter_service.resolve_for_ring(rings[0])
     plan = irrigation.compute_plan(
         ring=rings[0],
         area_m2=float(row["area_m2"]),
@@ -110,18 +107,11 @@ def field_irrigation(
         stage_key=stage or row["stage_key"],
         days=days,
         start=start_date,
-        params=parameter_service.params_for_plan(resolved),
     )
     plan["field"] = {
         "id": row["id"],
         "name": row["name"],
         "owner_id": row["owner_id"],
-    }
-    plan["parameter_scope"] = {
-        "scope": resolved.scope,
-        "values": resolved.values,
-        "sources": resolved.sources,
-        "region": resolved.region,
     }
     with db.transaction() as conn:
         conn.execute(
