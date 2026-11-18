@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from . import db
 from .config import BASE_DIR, settings
 from .routers import admin, admin_data, auth, fields, geo, imagery, irrigation, segment, sync
-from .services import era5, et_grid, imagery as imagery_service, regions, segmentation
+from .services import compute, era5, et_grid, imagery as imagery_service, regions, segmentation
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,7 +30,11 @@ async def lifespan(_: FastAPI):
         from .seed import ensure_seed
 
         ensure_seed()
+    compute.configure_threads()
     log.info("segmentation backend: %s", segmentation.backend_status()["backend"])
+    if settings.warmup_backend:
+        info = segmentation.warmup()
+        log.info("segmentation warmup: %s", info)
     grid = et_grid.status()
     log.info("ET grid: %s", "ready" if grid.get("available") else grid.get("error"))
     cube = era5.status()
@@ -69,6 +73,7 @@ def healthz() -> dict:
         "ok": True,
         "app": settings.app_name,
         "segmentation": segmentation.backend_status(),
+        "compute": compute.summary(),
         "et_grid": et_grid.status(),
         "era5": era5.status(),
         "imagery": imagery_service.provider_catalog(),

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -320,6 +323,41 @@ class Mosaic:
         return self.west, self.south, self.east, self.north
 
 
+# --- 拼图内存缓存 ---------------------------------------------------------
+# 同一片农田反复识别（同一个村来回点）时，省掉重复的瓦片读取、JPEG 解码与拼接。
+_mosaic_cache: "OrderedDict[tuple, Mosaic]" = OrderedDict()
+_mosaic_lock = threading.Lock()
+MOSAIC_CACHE_SIZE = int(os.getenv("HYDROCS_MOSAIC_CACHE", "8"))
+
+
+def _mosaic_lookup(key: tuple) -> Mosaic | None:
+    with _mosaic_lock:
+        mosaic = _mosaic_cache.get(key)
+        if mosaic is not None:
+            _mosaic_cache.move_to_end(key)
+        return mosaic
+
+
+def _mosaic_store(key: tuple, mosaic: Mosaic) -> None:
+    if MOSAIC_CACHE_SIZE <= 0:
+        return
+    with _mosaic_lock:
+        _mosaic_cache[key] = mosaic
+        _mosaic_cache.move_to_end(key)
+        while len(_mosaic_cache) > MOSAIC_CACHE_SIZE:
+            _mosaic_cache.popitem(last=False)
+
+
+def mosaic_cache_info() -> dict:
+    with _mosaic_lock:
+        return {"entries": len(_mosaic_cache), "capacity": MOSAIC_CACHE_SIZE}
+
+
+def mosaic_cache_clear() -> None:
+    with _mosaic_lock:
+        _mosaic_cache.clear()
+
+
 def build_mosaic(
     bbox: tuple[float, float, float, float],
     zoom: int | None = None,
@@ -342,6 +380,11 @@ def build_mosaic(
                 break
             zoom -= 1
     zoom = max(prov.min_zoom, min(prov.max_zoom, zoom))
+
+    key = (prov.key, zoom, round(min_lon, 6), round(min_lat, 6), round(max_lon, 6), round(max_lat, 6))
+    cached = _mosaic_lookup(key)
+    if cached is not None:
+        return cached
 
     x0, y0, x1, y1 = geo.tile_range(bbox, zoom)
     nx, ny = x1 - x0 + 1, y1 - y0 + 1
@@ -375,7 +418,7 @@ def build_mosaic(
         west, south = geo.gcj02_to_wgs84(west, south)
         east, north = geo.gcj02_to_wgs84(east, north)
 
-    return Mosaic(
+    mosaic = Mosaic(
         image=image,
         west=west,
         south=south,
@@ -386,6 +429,8 @@ def build_mosaic(
         tiles=len(coords),
         missing=missing,
     )
+    _mosaic_store(key, mosaic)
+    return mosaic
 
 
 def mosaic_png(mosaic: Mosaic) -> bytes:

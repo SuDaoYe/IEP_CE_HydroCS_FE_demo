@@ -80,6 +80,25 @@ class Settings:
     yolo_overlap: int = int(os.getenv("HYDROCS_YOLO_OVERLAP", "128"))
     segment_min_area_ha: float = float(os.getenv("HYDROCS_MIN_AREA_HA", "0.01"))
     segment_cache_ttl_minutes: int = int(os.getenv("HYDROCS_SEG_CACHE_MIN", "180"))
+    # 推理后端：auto | cuda | onnx-cuda | onnx-dml | torch-cpu | onnx-cpu
+    seg_backend: str = os.getenv("HYDROCS_SEG_BACKEND", "auto").strip().lower() or "auto"
+    # ONNX 权重（默认与 .pt 同名同目录；scripts/export_onnx.py 生成）
+    yolo_onnx: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("HYDROCS_ONNX", str(Path(os.getenv(
+                "HYDROCS_WEIGHTS", ARTIFACTS_DIR / "weights" / "4.102_best.pt"
+            )).with_suffix(".onnx")))
+        )
+    )
+    # 0 = 按后端自动（GPU 2 路、CPU 1 路）；显式给正整数即钉死并发上限
+    seg_max_concurrency: int = int(os.getenv("HYDROCS_SEG_CONCURRENCY", "0"))
+    # ONNX CPU 的 intra-op 线程数，0 = 用 ORT 默认
+    seg_ort_threads: int = int(os.getenv("HYDROCS_SEG_ORT_THREADS", "0"))
+    # OpenCV / torch CPU 线程数：0 = torch 自动（约一半核），OpenCV 默认 1
+    seg_cv_threads: int = int(os.getenv("HYDROCS_SEG_CV_THREADS", "1"))
+    seg_torch_threads: int = int(os.getenv("HYDROCS_SEG_TORCH_THREADS", "0"))
+    # 启动时预热识别引擎（首次请求会包含 ~3 s 的模型/CUDA 上下文初始化）
+    warmup_backend: bool = os.getenv("HYDROCS_WARMUP", "").lower() in {"1", "true", "yes"}
 
     # Irrigation ------------------------------------------------------------
     et_grid_path: Path = field(

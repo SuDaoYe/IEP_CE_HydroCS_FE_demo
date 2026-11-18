@@ -11,52 +11,60 @@ simplified and de-duplicated across window seams.
 from __future__ import annotations
 
 import logging
+import os
 import threading
+import time
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
 from ..config import settings
-from . import geo
+from . import compute, geo, seg_engine
 from .imagery import Mosaic
 
 log = logging.getLogger(__name__)
 
-_model_lock = threading.Lock()
-_model = None
-_model_error: str | None = None
+#: 设 HYDROCS_SEG_PROFILE=1 时打印各阶段耗时（排查并发退化用）
+_PROFILE = os.getenv("HYDROCS_SEG_PROFILE", "").lower() in {"1", "true", "yes"}
+
+#: 进程内推理闸门：CPU 上并发推理只会互相抢核，GPU 上过多并发会把显存/带宽打满
+_infer_lock = threading.Lock()
+_infer_gate: threading.BoundedSemaphore | None = None
+_infer_gate_size = 0
 
 
-def _get_model():
-    """Lazy-load the YOLO weights once per process."""
-    global _model, _model_error
-    if _model is not None or _model_error is not None:
-        return _model
-    with _model_lock:
-        if _model is not None or _model_error is not None:
-            return _model
-        if not settings.has_yolo_weights:
-            _model_error = f"weights not found: {settings.yolo_weights}"
-            return None
-        try:
-            from ultralytics import YOLO
+def _gate() -> threading.BoundedSemaphore:
+    """限制并发推理数（进程内）。
 
-            _model = YOLO(str(settings.yolo_weights))
-            log.info("loaded YOLO weights %s (task=%s)", settings.yolo_weights.name, _model.task)
-        except Exception as exc:  # pragma: no cover - environment dependent
-            _model_error = f"{exc.__class__.__name__}: {exc}"
-            log.warning("YOLO unavailable, falling back to heuristic: %s", _model_error)
-        return _model
+    实测：ultralytics 的 `predict` 在多线程下会互相拖慢（同一 predictor 内部状态 +
+    CUDA 同步），4 路并发的 p50 反而比串行慢 8 倍。所以默认**串行推理**，
+    横向扩展靠多进程（`uvicorn --workers N`），每个进程独占一份模型。
+    """
+    global _infer_gate, _infer_gate_size
+    configured = int(getattr(settings, "seg_max_concurrency", 0) or 0)
+    with _infer_lock:
+        if _infer_gate is None:
+            size = max(1, configured) if configured else 1
+            _infer_gate = threading.BoundedSemaphore(size)
+            _infer_gate_size = size
+            log.info("segment inference gate: %s concurrent", size)
+        return _infer_gate
 
 
 def backend_status() -> dict:
-    model = _get_model()
+    engine = seg_engine.get()
+    status = seg_engine.status()
+    gate_size = _gate()._initial_value if engine is not None else 0
     return {
-        "backend": "yolo11s-seg" if model is not None else "heuristic",
+        "backend": f"yolo11s-seg · {engine.key}" if engine is not None else "heuristic",
         "weights": str(settings.yolo_weights),
         "weights_present": settings.has_yolo_weights,
-        "error": _model_error,
+        "error": status["error"],
+        "engine": engine.describe() if engine is not None else None,
+        "device": engine.device if engine is not None else "cpu",
+        "concurrency": gate_size,
+        "options": status["options"],
     }
 
 
@@ -199,54 +207,69 @@ def _windows(width: int, height: int, window: int, overlap: int) -> list[tuple[i
     return [(x, y, min(window, width - x), min(window, height - y)) for y in ys for x in xs]
 
 
-def _run_yolo(mosaic: Mosaic, min_area_m2: float, conf: float) -> list[Candidate]:
-    model = _get_model()
-    if model is None:
-        raise RuntimeError(_model_error or "model unavailable")
+def _run_model(mosaic: Mosaic, min_area_m2: float, conf: float) -> list[Candidate]:
+    engine = seg_engine.get()
+    if engine is None:
+        raise RuntimeError(seg_engine.status().get("error") or "识别引擎不可用")
 
     height, width = mosaic.height, mosaic.width
     labels = np.zeros((height, width), np.int32)
     scores: dict[int, float] = {}
+    # 每个实例只记「标签 → 在 mosaic 坐标系里的外接框」，矢量化时按框裁切，
+    # 避免对整幅图逐标签做 astype / findContours（旧实现的主要耗时点）。
+    boxes_by_label: dict[int, tuple[int, int, int, int]] = {}
     next_label = 1
+    infer_ms = paint_ms = 0.0
 
     for x, y, w, h in _windows(width, height, settings.yolo_window, settings.yolo_overlap):
         crop = mosaic.image[y:y + h, x:x + w]
         if crop.size == 0:
             continue
-        result = model.predict(
-            crop,
-            imgsz=settings.yolo_imgsz,
-            conf=conf,
-            iou=settings.yolo_iou,
-            verbose=False,
-        )[0]
-        if result.masks is None:
+        started = time.perf_counter()
+        masks, box_scores, boxes = engine.predict(crop, conf=conf)
+        infer_ms += (time.perf_counter() - started) * 1000
+        if masks.shape[0] == 0:
             continue
-        masks = result.masks.data.cpu().numpy()
-        box_scores = result.boxes.conf.cpu().numpy() if result.boxes is not None else None
-        order = np.argsort(-box_scores) if box_scores is not None else np.arange(len(masks))
+        started = time.perf_counter()
+        order = np.argsort(-box_scores) if box_scores.size else np.arange(len(masks))
         for index in order:
             mask = masks[index]
             if mask.shape[:2] != (h, w):
                 mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-            binary = mask > 0.5
-            region = labels[y:y + h, x:x + w]
+            box = boxes[index] if boxes.shape[0] > index else np.array([0, 0, w, h])
+            x0, y0 = int(max(0, np.floor(box[0]))), int(max(0, np.floor(box[1])))
+            x1, y1 = int(min(w, np.ceil(box[2]))), int(min(h, np.ceil(box[3])))
+            if x1 - x0 < 2 or y1 - y0 < 2:
+                x0, y0, x1, y1 = 0, 0, w, h
+            binary = mask[y0:y1, x0:x1] > 0.5
+            region = labels[y + y0:y + y1, x + x0:x + x1]
             free = binary & (region == 0)
-            if free.sum() < 40:
+            if np.count_nonzero(free) < 40:
                 continue
             region[free] = next_label
-            scores[next_label] = (
-                float(box_scores[index]) if box_scores is not None and index < len(box_scores) else conf
-            )
+            scores[next_label] = float(box_scores[index]) if index < box_scores.size else conf
+            boxes_by_label[next_label] = (x + x0, y + y0, x1 - x0, y1 - y0)
             next_label += 1
+        paint_ms += (time.perf_counter() - started) * 1000
 
+    started = time.perf_counter()
     candidates: list[Candidate] = []
     for label, score in scores.items():
-        mask = labels == label
-        if mask.sum() < 40:
+        ox, oy, bw, bh = boxes_by_label[label]
+        sub = labels[oy:oy + bh, ox:ox + bw] == label
+        if np.count_nonzero(sub) < 40:
             continue
         candidates.extend(
-            _mask_to_candidates(mask, mosaic, (0, 0), min_area_m2, score, "yolo11s-seg")
+            _mask_to_candidates(sub, mosaic, (ox, oy), min_area_m2, score, "yolo11s-seg")
+        )
+    if _PROFILE:
+        log.info(
+            "profile[%s]: %d windows · infer %.0f ms · paint %.0f ms · vectorize %.0f ms",
+            threading.current_thread().name,
+            len(_windows(width, height, settings.yolo_window, settings.yolo_overlap)),
+            infer_ms,
+            paint_ms,
+            (time.perf_counter() - started) * 1000,
         )
     return candidates
 
@@ -290,6 +313,40 @@ def _run_heuristic(mosaic: Mosaic, min_area_m2: float) -> list[Candidate]:
     return candidates
 
 
+def reset() -> None:
+    """测试用：丢掉已加载的引擎。"""
+    seg_engine.reset()
+
+
+def warmup() -> dict:
+    """加载引擎并跑一次最小推理，把模型/上下文初始化成本挪到启动阶段。"""
+    import numpy as _np
+
+    engine = seg_engine.get()
+    if engine is None:
+        return {"ok": False, "error": seg_engine.status().get("error")}
+    started = time.perf_counter()
+    dummy = _np.zeros((512, 512, 3), _np.uint8)
+    engine.predict(dummy, conf=0.9)
+    return {
+        "ok": True,
+        "backend": engine.key,
+        "device": engine.device,
+        "ms": round((time.perf_counter() - started) * 1000, 1),
+    }
+
+
+def status() -> dict:
+    """给管理端/健康检查用的完整状态。"""
+    from . import imagery as _imagery
+
+    return {
+        **backend_status(),
+        "options": seg_engine.status()["options"],
+        "mosaic_cache": _imagery.mosaic_cache_info(),
+    }
+
+
 def segment(
     mosaic: Mosaic,
     min_area_ha: float | None = None,
@@ -300,22 +357,25 @@ def segment(
     min_area_m2 = (min_area_ha if min_area_ha is not None else settings.segment_min_area_ha) * 10_000
     conf = conf if conf is not None else settings.yolo_conf
 
-    used = "yolo11s-seg"
+    engine = seg_engine.get()
+    used = f"yolo11s-seg · {engine.key}" if engine is not None else "yolo11s-seg"
     error: str | None = None
     candidates: list[Candidate] = []
     try:
-        candidates = _run_yolo(mosaic, min_area_m2, conf)
+        candidates = _run_model(mosaic, min_area_m2, conf)
     except Exception as exc:  # noqa: BLE001
         error = f"{exc.__class__.__name__}: {exc}"
-        log.warning("YOLO inference failed: %s", error)
+        log.warning("model inference failed: %s", error)
         if not allow_heuristic:
             raise
 
-    if not candidates and allow_heuristic:
-        used = "heuristic"
-        candidates = _run_heuristic(mosaic, min_area_m2)
-
-    candidates = _dedupe(candidates)
+    # 规则兜底与去重也放进闸门：它们同样是 GIL 密集的 numpy/Python 工作，
+    # 多线程并行只会把彼此拖慢（实测 4 路并发的 p50 是串行的 5-8 倍）。
+    with _gate():
+        if not candidates and allow_heuristic:
+            used = "heuristic"
+            candidates = _run_heuristic(mosaic, min_area_m2)
+        candidates = _dedupe(candidates)
     candidates.sort(key=lambda c: c.area_m2, reverse=True)
     total_area = sum(c.area_m2 for c in candidates)
     mosaic_area = geo.geodesic_area_m2(

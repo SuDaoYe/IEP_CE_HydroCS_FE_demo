@@ -148,6 +148,14 @@ export default function Admin() {
                 <span className="text-[var(--hc-muted)]">田块识别</span>
                 <span className="hc-num ml-auto text-[var(--hc-ink)]">{stats?.segmentation.backend}</span>
               </li>
+              <li className="rounded-lg border border-[var(--hc-line)] bg-[var(--hc-surface-2)] p-2 text-[10.5px] leading-relaxed text-[var(--hc-faint)]">
+                算力 {String(stats?.compute?.chosen?.label ?? '—')}
+                {stats?.compute?.torch?.gpu ? ` · ${String(stats.compute.torch.gpu)}` : ''}
+                {stats?.compute?.torch?.cuda_build ? ` · CUDA ${String(stats.compute.torch.cuda_build)}` : ''}
+                {stats?.compute?.onnxruntime?.version
+                  ? ` · ORT ${String(stats.compute.onnxruntime.version)}`
+                  : ''}
+              </li>
               <li className="flex items-center gap-2">
                 <Icon
                   name={stats?.et_model?.available ? 'check' : 'info'}

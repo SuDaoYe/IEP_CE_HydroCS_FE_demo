@@ -1,0 +1,20 @@
+# 可选加速依赖（按机器二选一，不装也能跑：自动降级到 torch CPU）
+#
+# A) 有 NVIDIA 显卡 —— 原生 CUDA（识别 145 ms vs CPU 1130 ms）
+#    必须带本地版本号 + 官方 index，否则 pip 会认为已装好的 +cpu 版满足要求：
+#
+#      python -m pip install --index-url https://download.pytorch.org/whl/cu130 \
+#          torch==2.12.1+cu130 torchvision==0.27.1+cu130
+#
+#    驱动/显存要求：NVIDIA 驱动支持 CUDA 13.x，显存 ≥ 4 GB（每进程约 0.6 GB）。
+#
+# B) 没有 CUDA（AMD / Intel 显卡、或纯 CPU 机器想用 DirectML）—— 转译 ONNX
+#
+#      python -m pip install onnxruntime-directml      # Windows 10 1903+ / DX12 显卡
+#      python scripts/export_onnx.py                   # 生成 40 MB 的 .onnx
+#
+# C) 只有 CPU：什么也不用装，torch 的 CPU 版就是兜底（比 ONNX-CPU 快约 1.4×）。
+#
+# 装完启动服务即可，识别引擎自己选：
+#   cuda → onnx-cuda → onnx-dml → torch-cpu → onnx-cpu
+# 用 HYDROCS_SEG_BACKEND 可以钉死某一条；实测数据见 docs/performance.md。

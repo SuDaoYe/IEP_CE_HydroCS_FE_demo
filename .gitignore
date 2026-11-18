@@ -10,6 +10,8 @@ server/.cache/
 server/data/
 server/.env
 server/artifacts/.et_src/
+# ONNX 是 .pt 的转译产物（40 MB），用 scripts/export_onnx.py 生成
+server/artifacts/weights/*.onnx
 
 # Node
 node_modules/

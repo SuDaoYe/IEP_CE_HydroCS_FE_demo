@@ -231,7 +231,12 @@ export interface AdminStats {
   week_m3: number
   by_date: { date: string; volume_m3: number }[]
   crop_mix: { crop: string; area_mu: number }[]
-  segmentation: { backend: string; weights_present: boolean; error: string | null }
+  segmentation: { backend: string; weights_present: boolean; error: string | null; device?: string }
+  compute?: {
+    chosen: { backend: string; label: string; device: string; provider?: string | null }
+    torch?: { version?: string; cuda_build?: string | null; cuda_available?: boolean; gpu?: string }
+    onnxruntime?: { version?: string; providers?: string[] }
+  }
   et_model?: {
     available: boolean
     error?: string | null

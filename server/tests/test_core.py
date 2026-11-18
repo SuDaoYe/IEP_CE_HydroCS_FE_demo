@@ -540,3 +540,70 @@ def test_plan_reports_model_provenance():
     assert plan["et_source"]["basis"] == "model"
     assert plan["et_source"]["model"]["available"] is True
     assert any("训练好的日蒸散模型" in line for line in plan["assumptions"])
+
+# --- compute backends -----------------------------------------------------
+
+
+def test_compute_probe_reports_torch_and_onnx():
+    from app.services import compute
+
+    info = compute.probe(refresh=True)
+    assert "torch" in info and "onnxruntime" in info
+    assert info["cpu_cores"] >= 1
+    assert isinstance(info["onnxruntime"]["providers"], list)
+
+
+def test_compute_choose_respects_preference_and_falls_back():
+    from app.services import compute
+
+    info = compute.probe()
+    chosen = compute.choose({**info, "preference": "torch-cpu"})
+    assert chosen.key == "torch-cpu"
+
+    # 钉一个本机一定没有的后端，应该回落到自动选择而不是报错
+    fallback = compute.choose({**info, "preference": "onnx-dml"})
+    assert fallback.key in {"cuda", "onnx-cuda", "onnx-dml", "torch-cpu", "onnx-cpu", "heuristic"}
+
+
+def test_compute_choose_returns_heuristic_without_weights():
+    from app.services import compute
+
+    backend = compute.choose(weights_present=False)
+    assert backend.key == "heuristic"
+
+
+def test_compute_summary_shape():
+    from app.services import compute
+
+    summary = compute.summary()
+    assert summary["chosen"]["backend"]
+    assert len(summary["options"]) == 5
+    assert summary["order"][0] == "cuda"
+
+
+def test_unpad_masks_restores_square_and_rect_letterbox():
+    from app.services import seg_engine
+
+    # 方图 letterbox（居中等比缩放，左右留 pad）
+    square = np.ones((2, 1024, 1024), np.float32)
+    out = seg_engine._unpad_masks(square, (1024, 640))
+    assert out.shape == (2, 1024, 640)
+
+    # 已经是原图尺寸时应当零拷贝返回
+    exact = np.ones((1, 480, 640), np.float32)
+    same = seg_engine._unpad_masks(exact, (480, 640))
+    assert same.shape == (1, 480, 640)
+    assert same is exact
+
+    # 空掩膜
+    empty = np.zeros((0, 1024, 1024), np.float32)
+    assert seg_engine._unpad_masks(empty, (300, 400)).shape == (0, 300, 400)
+
+
+def test_segmentation_gate_is_process_wide_singleton():
+    from app.services import segmentation
+
+    first = segmentation._gate()
+    second = segmentation._gate()
+    assert first is second
+    assert first._initial_value >= 1

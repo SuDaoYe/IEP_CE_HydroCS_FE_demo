@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from .. import db, deps, repository
 from ..schemas import UserOut
-from ..services import era5, et_grid, et_model, geo, irrigation, segmentation
+from ..services import compute, era5, et_grid, et_model, geo, irrigation, segmentation
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -106,6 +106,7 @@ def stats(admin: deps.AdminUser, days: int = Query(default=7, ge=1, le=180)) -> 
         "by_date": totals["by_date"],
         "crop_mix": [{"crop": k, "area_mu": v} for k, v in sorted(crop_mix.items(), key=lambda kv: -kv[1])],
         "segmentation": segmentation.backend_status(),
+        "compute": compute.summary(),
         "et_model": et_model.status(),
         "et_grid": et_grid.status(),
         "era5": era5.status(),
